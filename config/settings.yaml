@@ -1,0 +1,39 @@
+# Investor Tracker Configuration
+
+# Tracked investors
+investors:
+  - id: "BRK"
+    name: "Warren Buffett"
+  - id: "psc"
+    name: "Bill Ackman"
+  - id: "SAM"
+    name: "Michael Burry"
+  - id: "GLRE"
+    name: "David Einhorn"
+  - id: "tp"
+    name: "Daniel Loeb"
+
+# Scraping settings
+scraping:
+  interval_hours: 24
+  timeout_seconds: 30
+
+# Alert settings
+alerts:
+  enabled: true
+  min_position_change: 25.0
+
+# Database settings
+database:
+  path: "data/investor_tracker.db"
+
+# Telegram Bot settings
+telegram:
+  # Set your bot token here or use TELEGRAM_BOT_TOKEN env variable
+  # Get token from @BotFather on Telegram
+  token: ""
+
+# Web dashboard settings
+web:
+  host: "0.0.0.0"
+  port: 8501

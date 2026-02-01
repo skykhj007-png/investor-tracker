@@ -1,0 +1,14 @@
+requests
+beautifulsoup4
+pandas
+rich
+click
+sqlalchemy
+pyyaml
+schedule
+python-telegram-bot
+streamlit
+plotly
+lxml
+html5lib
+pykrx

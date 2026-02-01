@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "investor-tracker"
+version = "1.0.0"
+description = "Track super investor portfolios from SEC 13F filings"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "requests",
+    "beautifulsoup4",
+    "pandas",
+    "rich",
+    "click",
+    "sqlalchemy",
+    "pyyaml",
+    "schedule",
+]
+
+[project.scripts]
+itrack = "src.main:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]

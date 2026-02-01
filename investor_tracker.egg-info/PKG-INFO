@@ -1,0 +1,14 @@
+Metadata-Version: 2.4
+Name: investor-tracker
+Version: 1.0.0
+Summary: Track super investor portfolios from SEC 13F filings
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: requests
+Requires-Dist: beautifulsoup4
+Requires-Dist: pandas
+Requires-Dist: rich
+Requires-Dist: click
+Requires-Dist: sqlalchemy
+Requires-Dist: pyyaml
+Requires-Dist: schedule
