@@ -1,15 +1,38 @@
-"""연금저축 투자상품 추천 분석기."""
+"""연금저축 투자상품 추천 분석기 (개선된 알고리즘)."""
 
 import pandas as pd
+import math
 from typing import Optional
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.scrapers.pension_etf import ETFScraper, NewsScraper, AssetAllocationAdvisor, SectorLeaderData
+
+try:
+    from pykrx import stock as krx
+    PYKRX_AVAILABLE = True
+except ImportError:
+    PYKRX_AVAILABLE = False
+
+
+def get_recent_trading_date():
+    """최근 거래일 반환."""
+    today = datetime.now()
+    if today.weekday() == 5:
+        today -= timedelta(days=1)
+    elif today.weekday() == 6:
+        today -= timedelta(days=2)
+    if today.hour < 16:
+        today -= timedelta(days=1)
+        if today.weekday() == 5:
+            today -= timedelta(days=1)
+        elif today.weekday() == 6:
+            today -= timedelta(days=2)
+    return today.strftime("%Y%m%d")
 
 
 @dataclass
@@ -22,12 +45,26 @@ class MarketSentiment:
 
 
 class PensionRecommender:
-    """연금저축 투자상품 추천기."""
+    """연금저축 투자상품 추천기 (개선된 알고리즘)."""
 
-    # 키워드별 감성 점수
+    # 가중치 기반 감성 키워드 (강도별 분류)
     SENTIMENT_KEYWORDS = {
-        'positive': ['상승', '호재', '급등', '신고가', '매수', '상향', '호실적', '성장', '회복', '반등'],
-        'negative': ['하락', '악재', '급락', '신저가', '매도', '하향', '부진', '우려', '리스크', '조정'],
+        'strong_positive': {
+            'keywords': ['급등', '폭등', '신고가', '사상최고', '대호재', '급반등'],
+            'weight': 3,
+        },
+        'positive': {
+            'keywords': ['상승', '호재', '매수', '상향', '호실적', '성장', '회복', '반등', '강세', '호조', '개선', '확대'],
+            'weight': 1,
+        },
+        'strong_negative': {
+            'keywords': ['급락', '폭락', '신저가', '대폭하락', '대악재', '붕괴'],
+            'weight': 3,
+        },
+        'negative': {
+            'keywords': ['하락', '악재', '매도', '하향', '부진', '우려', '리스크', '조정', '약세', '감소', '위축', '둔화'],
+            'weight': 1,
+        },
     }
 
     # 테마별 추천 ETF 키워드
@@ -48,43 +85,53 @@ class PensionRecommender:
         self.allocator = AssetAllocationAdvisor()
 
     def analyze_market_sentiment(self) -> MarketSentiment:
-        """시장 심리 분석."""
-        # 뉴스 수집
+        """시장 심리 분석 (가중치 기반 개선)."""
         news_items = self.news_scraper.get_market_news("증시", 20)
         themes = self.news_scraper.get_trending_themes()
 
-        # 감성 분석
-        positive_count = 0
-        negative_count = 0
+        # 가중치 기반 감성 분석
+        positive_score = 0
+        negative_score = 0
 
         for news in news_items:
             title = news['title']
-            for keyword in self.SENTIMENT_KEYWORDS['positive']:
-                if keyword in title:
-                    positive_count += 1
-            for keyword in self.SENTIMENT_KEYWORDS['negative']:
-                if keyword in title:
-                    negative_count += 1
+            # 강한 긍정
+            for kw in self.SENTIMENT_KEYWORDS['strong_positive']['keywords']:
+                if kw in title:
+                    positive_score += self.SENTIMENT_KEYWORDS['strong_positive']['weight']
+            # 일반 긍정
+            for kw in self.SENTIMENT_KEYWORDS['positive']['keywords']:
+                if kw in title:
+                    positive_score += self.SENTIMENT_KEYWORDS['positive']['weight']
+            # 강한 부정
+            for kw in self.SENTIMENT_KEYWORDS['strong_negative']['keywords']:
+                if kw in title:
+                    negative_score += self.SENTIMENT_KEYWORDS['strong_negative']['weight']
+            # 일반 부정
+            for kw in self.SENTIMENT_KEYWORDS['negative']['keywords']:
+                if kw in title:
+                    negative_score += self.SENTIMENT_KEYWORDS['negative']['weight']
 
         # 점수 계산 (-100 ~ +100)
-        total = positive_count + negative_count
+        total = positive_score + negative_score
         if total > 0:
-            score = int(((positive_count - negative_count) / total) * 100)
+            score = int(((positive_score - negative_score) / total) * 100)
         else:
             score = 0
 
-        # 전체 심리 판단
-        if score > 20:
+        # 전체 심리 판단 (세분화)
+        if score > 40:
             overall = 'bullish'
-        elif score < -20:
+        elif score > 10:
+            overall = 'mild_bullish'
+        elif score < -40:
             overall = 'bearish'
+        elif score < -10:
+            overall = 'mild_bearish'
         else:
             overall = 'neutral'
 
-        # 유망 테마 추출
         hot_themes = [t['name'] for t in themes[:5]] if themes else []
-
-        # 뉴스 요약
         news_summary = "주요 뉴스: " + ", ".join([n['title'][:30] for n in news_items[:3]]) if news_items else ""
 
         return MarketSentiment(
@@ -95,16 +142,21 @@ class PensionRecommender:
         )
 
     def get_sentiment_based_allocation(self) -> dict:
-        """시장 심리 기반 자산배분 추천."""
+        """시장 심리 기반 자산배분 추천 (세분화)."""
         sentiment = self.analyze_market_sentiment()
 
-        # 심리에 따른 리스크 수준 결정
         if sentiment.overall == 'bullish':
             risk_level = 'aggressive'
-            advice = "시장 심리가 긍정적입니다. 주식 비중 확대를 고려할 수 있습니다."
+            advice = "시장 심리가 매우 긍정적입니다. 주식 비중 확대를 고려할 수 있습니다."
+        elif sentiment.overall == 'mild_bullish':
+            risk_level = 'moderate'
+            advice = "시장 심리가 약간 긍정적입니다. 균형 잡힌 투자를 추천합니다."
         elif sentiment.overall == 'bearish':
             risk_level = 'conservative'
-            advice = "시장 심리가 부정적입니다. 채권/현금 비중 확대를 고려하세요."
+            advice = "시장 심리가 매우 부정적입니다. 채권/현금 비중 확대를 고려하세요."
+        elif sentiment.overall == 'mild_bearish':
+            risk_level = 'moderate'
+            advice = "시장 심리가 약간 부정적입니다. 방어적 포트폴리오를 유지하세요."
         else:
             risk_level = 'moderate'
             advice = "시장 심리가 중립적입니다. 균형 잡힌 포트폴리오를 유지하세요."
@@ -122,6 +174,44 @@ class PensionRecommender:
             'risk_level': risk_level,
         }
 
+    def _calculate_volatility(self, symbol: str) -> float:
+        """ETF 변동성 계산 (20일 표준편차 기반)."""
+        if not PYKRX_AVAILABLE:
+            return 0
+
+        try:
+            trd_date = get_recent_trading_date()
+            today_dt = datetime.strptime(trd_date, "%Y%m%d")
+            start_date = (today_dt - timedelta(days=35)).strftime("%Y%m%d")
+
+            ohlcv = krx.get_etf_ohlcv_by_date(start_date, trd_date, symbol)
+            if ohlcv.empty or len(ohlcv) < 10:
+                return 0
+
+            closes = ohlcv['종가']
+            # 일별 수익률
+            returns = closes.pct_change().dropna()
+
+            if len(returns) < 5:
+                return 0
+
+            # 연환산 변동성 (일별 표준편차 * sqrt(252))
+            volatility = returns.std() * (252 ** 0.5) * 100
+            return round(volatility, 2)
+
+        except Exception:
+            return 0
+
+    def _risk_adjusted_score(self, return_val: float, volatility: float) -> float:
+        """변동성 조정 수익률 점수 (샤프 비율 유사)."""
+        if volatility <= 0:
+            return return_val
+
+        # 변동성이 높으면 수익률을 할인
+        # 간단한 샤프 유사 비율: return / (1 + volatility/100)
+        adjusted = return_val / (1 + volatility / 100)
+        return round(adjusted, 2)
+
     def get_theme_etfs(self, theme: str, top_n: int = 5) -> pd.DataFrame:
         """테마별 ETF 추천."""
         etfs = self.etf_scraper.get_pension_etfs(50)
@@ -129,7 +219,6 @@ class PensionRecommender:
         if etfs.empty:
             return pd.DataFrame()
 
-        # 테마 키워드 매칭
         keywords = self.THEME_ETF_KEYWORDS.get(theme, [theme])
 
         filtered = etfs[etfs['name'].str.upper().apply(
@@ -137,30 +226,22 @@ class PensionRecommender:
         )]
 
         if filtered.empty:
-            # 매칭 실패시 자산군으로 시도
             filtered = etfs[etfs['asset_class'] == theme]
 
         return filtered.head(top_n)
 
     def get_comprehensive_recommendation(self) -> dict:
         """종합 연금저축 추천."""
-        # 1. 시장 심리 분석
         sentiment = self.analyze_market_sentiment()
-
-        # 2. 자산배분 추천
         allocation_result = self.get_sentiment_based_allocation()
-
-        # 3. ETF 수익률 상위
         top_etfs = self.etf_scraper.get_pension_etfs(10)
 
-        # 4. 테마별 추천
         theme_recommendations = {}
         for theme in sentiment.themes[:3]:
             theme_etfs = self.get_theme_etfs(theme, 3)
             if not theme_etfs.empty:
                 theme_recommendations[theme] = theme_etfs.to_dict('records')
 
-        # 5. 자산군별 추천
         asset_class_recommendations = {}
         for asset_class, weight in allocation_result['allocation'].items():
             if weight > 0:
@@ -185,15 +266,38 @@ class PensionRecommender:
         }
 
     def get_quick_picks(self, top_n: int = 5) -> pd.DataFrame:
-        """빠른 추천 - 수익률 + 연금적합 ETF."""
+        """빠른 추천 - 변동성 조정 수익률 기반 (개선)."""
         etfs = self.etf_scraper.get_pension_etfs(20)
 
         if etfs.empty:
             return pd.DataFrame()
 
-        # 수익률 + 거래량 기반 점수
         etfs = etfs.copy()
-        etfs['score'] = etfs['return_1m'] * 0.6 + etfs['return_3m'] * 0.4
+
+        # 변동성 계산 및 조정 수익률
+        volatilities = []
+        adjusted_scores = []
+
+        for _, row in etfs.iterrows():
+            vol = self._calculate_volatility(row['symbol'])
+            volatilities.append(vol)
+
+            # 변동성 조정 점수
+            raw_score = row['return_1m'] * 0.5 + row['return_3m'] * 0.3
+            adj_score = self._risk_adjusted_score(raw_score, vol)
+
+            # 1개월 > 3개월 양수면 추세 보너스
+            if row['return_1m'] > 0 and row['return_3m'] > 0:
+                adj_score += 5  # 지속 상승 보너스
+
+            # 1개월 급등(>15%)이면 과열 패널티
+            if row['return_1m'] > 15:
+                adj_score -= 3
+
+            adjusted_scores.append(adj_score)
+
+        etfs['volatility'] = volatilities
+        etfs['score'] = adjusted_scores
 
         return etfs.sort_values('score', ascending=False).head(top_n)
 
@@ -220,7 +324,6 @@ class PensionRecommender:
         sentiment = self.analyze_market_sentiment()
         trending_themes = sentiment.themes[:top_n] if sentiment.themes else []
 
-        # 기본 섹터 추가 (트렌딩 테마가 부족할 경우)
         default_sectors = ['반도체', 'AI', '2차전지', '바이오', '자동차']
         for sector in default_sectors:
             if sector not in trending_themes and len(trending_themes) < top_n:
@@ -228,7 +331,6 @@ class PensionRecommender:
 
         results = []
         for theme in trending_themes[:top_n]:
-            # 섹터명 매칭
             sector_name = self._match_sector_name(theme)
             if sector_name:
                 sector_data = self.get_sector_leaders(sector_name)
@@ -267,12 +369,7 @@ class PensionRecommender:
         return None
 
     def get_accumulation_signals(self, top_n: int = 15) -> pd.DataFrame:
-        """ETF 매집 신호 분석.
-
-        거래량 증가 + 가격 추세를 분석하여 매집 신호 포착.
-        - 거래량 급증 + 가격 상승 = 강한 매집
-        - 거래량 급증 + 가격 하락 = 세력 매집 추정
-        """
+        """ETF 매집 신호 분석."""
         return self.etf_scraper.get_etf_accumulation_signals(top_n)
 
     def get_accumulation_with_news(self, top_n: int = 10) -> list:
@@ -284,11 +381,9 @@ class PensionRecommender:
 
         results = []
         for _, row in signals_df.iterrows():
-            # ETF 이름에서 테마 추출
             etf_name = row['name']
             theme = self._extract_theme_from_name(etf_name)
 
-            # 관련 뉴스
             news = []
             if theme:
                 news = self.news_scraper.get_theme_news(theme, 3)
@@ -330,14 +425,10 @@ class PensionRecommender:
         return None
 
     def get_buy_recommendations(self, top_n: int = 10) -> dict:
-        """종합 매수 추천 - 수익률 + 매집 신호 결합."""
-        # 수익률 기준
+        """종합 매수 추천 - 변동성 조정 수익률 + 매집 신호 결합 (개선)."""
         quick_picks = self.get_quick_picks(15)
-
-        # 매집 신호 기준
         accumulation = self.get_accumulation_signals(15)
 
-        # 양쪽에 모두 등장하는 ETF = 강력 추천
         strong_picks = []
         if not quick_picks.empty and not accumulation.empty:
             quick_symbols = set(quick_picks['symbol'].tolist())
@@ -353,16 +444,16 @@ class PensionRecommender:
                     'name': quick_row['name'],
                     'price': quick_row['price'],
                     'return_1m': quick_row['return_1m'],
+                    'volatility': quick_row.get('volatility', 0),
                     'accumulation_score': acc_row['accumulation_score'],
                     'signals': acc_row['signals'],
                     'combined_score': quick_row['score'] + acc_row['accumulation_score'],
                 })
 
-        # 정렬
         strong_picks = sorted(strong_picks, key=lambda x: x['combined_score'], reverse=True)[:top_n]
 
         return {
-            'strong_picks': strong_picks,  # 수익률 + 매집 동시 충족
+            'strong_picks': strong_picks,
             'by_return': quick_picks.head(top_n).to_dict('records') if not quick_picks.empty else [],
             'by_accumulation': accumulation.head(top_n).to_dict('records') if not accumulation.empty else [],
         }
@@ -380,14 +471,12 @@ if __name__ == "__main__":
 
     recommender = PensionRecommender()
 
-    # 시장 심리
     print("\n[시장 심리 분석]")
     print("-" * 60)
     sentiment = recommender.analyze_market_sentiment()
     print(f"전체 심리: {sentiment.overall} (점수: {sentiment.score})")
     print(f"유망 테마: {', '.join(sentiment.themes[:5])}")
 
-    # 자산배분 추천
     print("\n[자산배분 추천]")
     print("-" * 60)
     allocation = recommender.get_sentiment_based_allocation()
@@ -398,12 +487,12 @@ if __name__ == "__main__":
         if weight > 0:
             print(f"  - {asset}: {weight}%")
 
-    # 빠른 추천
     print("\n[연금저축 ETF 추천 TOP 5]")
     print("-" * 60)
     picks = recommender.get_quick_picks(5)
     if not picks.empty:
         for _, row in picks.iterrows():
-            print(f"{row['rank']:2}. {row['name'][:25]:25} | 1M: {row['return_1m']:+.1f}% | {row['asset_class']}")
+            vol = row.get('volatility', 0)
+            print(f"{row['rank']:2}. {row['name'][:25]:25} | 1M: {row['return_1m']:+.1f}% | 변동성: {vol:.1f}% | {row['asset_class']}")
     else:
         print("데이터 없음")

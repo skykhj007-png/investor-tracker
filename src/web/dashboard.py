@@ -717,7 +717,7 @@ elif page == "💰 연금저축":
         # 심리 점수 표시
         col1, col2, col3 = st.columns(3)
 
-        sentiment_emoji = {"bullish": "🟢 강세", "neutral": "🟡 중립", "bearish": "🔴 약세"}
+        sentiment_emoji = {"bullish": "🟢 강세", "mild_bullish": "🟢 약강세", "neutral": "🟡 중립", "mild_bearish": "🔴 약약세", "bearish": "🔴 약세"}
         col1.metric("시장 심리", sentiment_emoji.get(sentiment.overall, "중립"))
         col2.metric("심리 점수", f"{sentiment.score:+d}")
         col3.metric("추천 성향", allocation_result['risk_level'].upper())

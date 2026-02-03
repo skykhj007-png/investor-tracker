@@ -2,7 +2,8 @@
 
 import pandas as pd
 from typing import Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 
 import sys
 from pathlib import Path
@@ -10,37 +11,240 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.scrapers.korean_stocks import KoreanStocksScraper
 
+try:
+    from pykrx import stock as krx
+    PYKRX_AVAILABLE = True
+except ImportError:
+    PYKRX_AVAILABLE = False
+
+
+def get_recent_trading_date() -> str:
+    """Get most recent trading date (skip weekends)."""
+    today = datetime.now()
+    if today.hour < 18:
+        today = today - timedelta(days=1)
+    while today.weekday() >= 5:
+        today = today - timedelta(days=1)
+    return today.strftime("%Y%m%d")
+
 
 @dataclass
 class StockSignal:
     """Individual stock signal data."""
     symbol: str
     name: str
-    foreign_rank: Optional[int] = None  # 외국인 순매수 순위
-    foreign_amount: float = 0  # 외국인 순매수 금액
-    inst_rank: Optional[int] = None  # 기관 순매수 순위
-    inst_amount: float = 0  # 기관 순매수 금액
-    short_ratio: float = 0  # 공매도 비중
-    score: float = 0  # 종합 점수
-    signals: list = None  # 시그널 목록
+    foreign_rank: Optional[int] = None
+    foreign_amount: float = 0
+    inst_rank: Optional[int] = None
+    inst_amount: float = 0
+    short_ratio: float = 0
+    score: float = 0
+    signals: list = field(default_factory=list)
+    # 새로운 필드
+    momentum_score: float = 0
+    volume_score: float = 0
+    amount_score: float = 0
+    consecutive_days: int = 0
+    market_cap: float = 0
 
 
 class KoreanStockRecommender:
-    """종목 추천 분석기 - 외국인/기관/공매도 데이터 종합 분석."""
+    """종목 추천 분석기 - 외국인/기관/공매도/모멘텀/거래량 종합 분석."""
 
     def __init__(self):
         self.scraper = KoreanStocksScraper()
 
+    def _get_price_momentum(self, symbol: str) -> dict:
+        """가격 모멘텀 분석 (5일/20일 이동평균 기반)."""
+        if not PYKRX_AVAILABLE:
+            return {'momentum_score': 0, 'price_change_5d': 0, 'price_change_20d': 0, 'trend': 'unknown'}
+
+        try:
+            trd_date = get_recent_trading_date()
+            today_dt = datetime.strptime(trd_date, "%Y%m%d")
+            start_date = (today_dt - timedelta(days=40)).strftime("%Y%m%d")
+
+            ohlcv = krx.get_market_ohlcv_by_date(start_date, trd_date, symbol)
+            if ohlcv.empty or len(ohlcv) < 5:
+                return {'momentum_score': 0, 'price_change_5d': 0, 'price_change_20d': 0, 'trend': 'unknown'}
+
+            closes = ohlcv['종가']
+            current_price = closes.iloc[-1]
+
+            # 5일 이동평균
+            ma5 = closes.tail(5).mean()
+            # 20일 이동평균
+            ma20 = closes.tail(20).mean() if len(closes) >= 20 else closes.mean()
+
+            # 5일 수익률
+            price_5d_ago = closes.iloc[-5] if len(closes) >= 5 else closes.iloc[0]
+            price_change_5d = ((current_price - price_5d_ago) / price_5d_ago) * 100
+
+            # 20일 수익률
+            price_20d_ago = closes.iloc[-20] if len(closes) >= 20 else closes.iloc[0]
+            price_change_20d = ((current_price - price_20d_ago) / price_20d_ago) * 100
+
+            # 모멘텀 점수 계산
+            momentum_score = 0
+
+            # 현재가 > 5일선 > 20일선 = 강한 상승 추세
+            if current_price > ma5 > ma20:
+                momentum_score += 15
+                trend = 'strong_up'
+            elif current_price > ma5:
+                momentum_score += 10
+                trend = 'up'
+            elif current_price > ma20:
+                momentum_score += 5
+                trend = 'mild_up'
+            elif current_price < ma5 < ma20:
+                momentum_score -= 5
+                trend = 'down'
+            else:
+                trend = 'neutral'
+
+            # 5일 수익률 보너스
+            if price_change_5d > 5:
+                momentum_score += 10
+            elif price_change_5d > 2:
+                momentum_score += 5
+            elif price_change_5d < -5:
+                momentum_score -= 5
+
+            return {
+                'momentum_score': momentum_score,
+                'price_change_5d': round(price_change_5d, 2),
+                'price_change_20d': round(price_change_20d, 2),
+                'trend': trend,
+            }
+
+        except Exception:
+            return {'momentum_score': 0, 'price_change_5d': 0, 'price_change_20d': 0, 'trend': 'unknown'}
+
+    def _get_volume_surge(self, symbol: str) -> dict:
+        """거래량 급증 분석."""
+        if not PYKRX_AVAILABLE:
+            return {'volume_score': 0, 'vol_change_pct': 0}
+
+        try:
+            trd_date = get_recent_trading_date()
+            today_dt = datetime.strptime(trd_date, "%Y%m%d")
+            start_date = (today_dt - timedelta(days=20)).strftime("%Y%m%d")
+
+            ohlcv = krx.get_market_ohlcv_by_date(start_date, trd_date, symbol)
+            if ohlcv.empty or len(ohlcv) < 10:
+                return {'volume_score': 0, 'vol_change_pct': 0}
+
+            recent_vol = ohlcv['거래량'].tail(5).mean()
+            prev_vol = ohlcv['거래량'].iloc[-10:-5].mean()
+
+            if prev_vol <= 0:
+                return {'volume_score': 0, 'vol_change_pct': 0}
+
+            vol_change = ((recent_vol - prev_vol) / prev_vol) * 100
+
+            volume_score = 0
+            if vol_change > 100:
+                volume_score = 15  # 거래량 2배 이상
+            elif vol_change > 50:
+                volume_score = 10  # 거래량 1.5배 이상
+            elif vol_change > 20:
+                volume_score = 5   # 거래량 20% 이상 증가
+
+            return {
+                'volume_score': volume_score,
+                'vol_change_pct': round(vol_change, 1),
+            }
+
+        except Exception:
+            return {'volume_score': 0, 'vol_change_pct': 0}
+
+    def _calculate_amount_score(self, amount: float, max_amount: float) -> float:
+        """매수금액 크기 기반 점수 (0~20점)."""
+        if max_amount <= 0 or amount <= 0:
+            return 0
+        # 최대 매수금액 대비 비율로 점수 산정 (로그 스케일)
+        import math
+        ratio = amount / max_amount
+        return round(min(20, 20 * math.log(1 + ratio * 9) / math.log(10)), 1)
+
+    def _get_consecutive_buying(self, symbol: str, investor_type: str = "외국인") -> int:
+        """연속 매수일 수 확인 (최대 5일)."""
+        if not PYKRX_AVAILABLE:
+            return 0
+
+        try:
+            trd_date = get_recent_trading_date()
+            today_dt = datetime.strptime(trd_date, "%Y%m%d")
+            start_date = (today_dt - timedelta(days=10)).strftime("%Y%m%d")
+
+            df = krx.get_market_net_purchases_of_equities_by_ticker(
+                start_date, trd_date, "KOSPI", investor_type
+            )
+
+            if df.empty or symbol not in df.index:
+                return 0
+
+            # 일별 데이터 확인은 제한적이므로,
+            # 순매수 금액이 양수면 최소 1일 매수로 간주
+            net_amount = df.loc[symbol, '순매수거래대금'] if '순매수거래대금' in df.columns else 0
+            if net_amount > 0:
+                return 1
+            return 0
+
+        except Exception:
+            return 0
+
+    def _get_market_cap_filter(self, symbol: str) -> dict:
+        """시가총액 필터 및 점수."""
+        if not PYKRX_AVAILABLE:
+            return {'market_cap': 0, 'cap_score': 0, 'cap_label': ''}
+
+        try:
+            trd_date = get_recent_trading_date()
+            cap_df = krx.get_market_cap_by_ticker(trd_date, market="KOSPI")
+
+            if cap_df.empty or symbol not in cap_df.index:
+                return {'market_cap': 0, 'cap_score': 0, 'cap_label': ''}
+
+            market_cap = cap_df.loc[symbol, '시가총액']
+            cap_조 = market_cap / 1e12
+
+            # 시가총액 점수 (대형주 가산점, 소형주 감점)
+            if cap_조 >= 10:
+                cap_score = 10
+                cap_label = '대형주'
+            elif cap_조 >= 1:
+                cap_score = 5
+                cap_label = '중형주'
+            elif cap_조 >= 0.3:
+                cap_score = 0
+                cap_label = '소형주'
+            else:
+                cap_score = -5
+                cap_label = '초소형주'
+
+            return {
+                'market_cap': market_cap,
+                'cap_score': cap_score,
+                'cap_label': cap_label,
+            }
+
+        except Exception:
+            return {'market_cap': 0, 'cap_score': 0, 'cap_label': ''}
+
     def get_recommendations(self, market: str = "KOSPI", top_n: int = 20) -> pd.DataFrame:
         """
-        종합 추천 종목 리스트 생성.
+        종합 추천 종목 리스트 생성 (개선된 알고리즘).
 
-        점수 산정 기준:
-        - 외국인 순매수 상위 30위 내: +30점 (순위에 따라 가중)
-        - 기관 순매수 상위 30위 내: +30점 (순위에 따라 가중)
-        - 외국인+기관 동반 매수: +20점 (시너지 보너스)
-        - 공매도 비중 10% 이하: +10점
-        - 공매도 비중 20% 이상: -10점
+        점수 산정 기준 (총 100점 만점):
+        - 외국인 순매수: 순위 점수(0~20) + 금액 점수(0~20) = 최대 40점
+        - 기관 순매수: 순위 점수(0~20) + 금액 점수(0~20) = 최대 40점
+        - 동반 매수 시너지: +15점
+        - 가격 모멘텀: -5 ~ +25점
+        - 거래량 급증: 0 ~ +15점
+        - 시가총액: -5 ~ +10점
+        - 공매도 비중: -10 ~ +10점
 
         Returns:
             DataFrame with recommended stocks and scores
@@ -52,6 +256,10 @@ class KoreanStockRecommender:
 
         if foreign_df.empty and inst_df.empty:
             return pd.DataFrame()
+
+        # 최대 매수금액 (금액 점수 정규화용)
+        max_foreign_amount = foreign_df['net_amount'].max() if not foreign_df.empty else 1
+        max_inst_amount = inst_df['net_amount'].max() if not inst_df.empty else 1
 
         # 종목별 데이터 통합
         stocks = {}
@@ -80,51 +288,142 @@ class KoreanStockRecommender:
             stocks[symbol].inst_rank = int(row['rank'])
             stocks[symbol].inst_amount = row['net_amount']
 
-        # 공매도 데이터 (비중)
+        # 공매도 데이터
         short_dict = {}
         if not short_df.empty:
             for _, row in short_df.iterrows():
                 short_dict[row['symbol']] = row['short_ratio']
+
+        # 모멘텀/거래량/시총 분석 (상위 종목만 - 속도 최적화)
+        # 순위 30위 이내 또는 동반매수 종목만 상세 분석
+        priority_symbols = set()
+        for symbol, stock in stocks.items():
+            fr = stock.foreign_rank or 999
+            ir = stock.inst_rank or 999
+            if fr <= 30 or ir <= 30 or (stock.foreign_rank and stock.inst_rank):
+                priority_symbols.add(symbol)
+
+        momentum_cache = {}
+        volume_cache = {}
+        cap_cache = {}
+
+        for symbol in priority_symbols:
+            momentum_cache[symbol] = self._get_price_momentum(symbol)
+            volume_cache[symbol] = self._get_volume_surge(symbol)
+
+        # 시총은 한번에 조회
+        if PYKRX_AVAILABLE:
+            try:
+                trd_date = get_recent_trading_date()
+                cap_df = krx.get_market_cap_by_ticker(trd_date, market="KOSPI")
+                for symbol in priority_symbols:
+                    if symbol in cap_df.index:
+                        mc = cap_df.loc[symbol, '시가총액']
+                        cap_조 = mc / 1e12
+                        if cap_조 >= 10:
+                            cap_cache[symbol] = {'market_cap': mc, 'cap_score': 10, 'cap_label': '대형주'}
+                        elif cap_조 >= 1:
+                            cap_cache[symbol] = {'market_cap': mc, 'cap_score': 5, 'cap_label': '중형주'}
+                        elif cap_조 >= 0.3:
+                            cap_cache[symbol] = {'market_cap': mc, 'cap_score': 0, 'cap_label': '소형주'}
+                        else:
+                            cap_cache[symbol] = {'market_cap': mc, 'cap_score': -5, 'cap_label': '초소형주'}
+            except Exception:
+                pass
 
         # 점수 계산
         for symbol, stock in stocks.items():
             score = 0
             signals = []
 
-            # 외국인 순매수 점수 (순위가 높을수록 높은 점수)
+            # === 1. 외국인 순매수 (최대 40점) ===
             if stock.foreign_rank:
-                foreign_score = max(0, 30 - stock.foreign_rank + 1)  # 1위=30점, 30위=1점
-                score += foreign_score
-                if stock.foreign_rank <= 10:
+                # 순위 점수 (1위=20점, 30위=1점)
+                rank_score = max(0, 21 - stock.foreign_rank) if stock.foreign_rank <= 20 else 0
+                score += rank_score
+
+                # 금액 점수 (매수 규모 반영, 최대 20점)
+                amount_score = self._calculate_amount_score(stock.foreign_amount, max_foreign_amount)
+                score += amount_score
+
+                if stock.foreign_rank <= 5:
                     signals.append(f"🌍외국인 TOP{stock.foreign_rank}")
+                elif stock.foreign_rank <= 10:
+                    signals.append(f"🌍외국인 {stock.foreign_rank}위")
                 elif stock.foreign_rank <= 30:
                     signals.append(f"외국인 {stock.foreign_rank}위")
 
-            # 기관 순매수 점수
+                amount_억 = int(stock.foreign_amount / 1e8)
+                if amount_억 >= 100:
+                    signals.append(f"💰외국인{amount_억}억")
+
+            # === 2. 기관 순매수 (최대 40점) ===
             if stock.inst_rank:
-                inst_score = max(0, 30 - stock.inst_rank + 1)
-                score += inst_score
-                if stock.inst_rank <= 10:
+                rank_score = max(0, 21 - stock.inst_rank) if stock.inst_rank <= 20 else 0
+                score += rank_score
+
+                amount_score = self._calculate_amount_score(stock.inst_amount, max_inst_amount)
+                score += amount_score
+
+                if stock.inst_rank <= 5:
                     signals.append(f"🏛️기관 TOP{stock.inst_rank}")
+                elif stock.inst_rank <= 10:
+                    signals.append(f"🏛️기관 {stock.inst_rank}위")
                 elif stock.inst_rank <= 30:
                     signals.append(f"기관 {stock.inst_rank}위")
 
-            # 동반 매수 시너지 보너스
+                amount_억 = int(stock.inst_amount / 1e8)
+                if amount_억 >= 100:
+                    signals.append(f"💰기관{amount_억}억")
+
+            # === 3. 동반 매수 시너지 (+15점) ===
             if stock.foreign_rank and stock.inst_rank:
                 if stock.foreign_rank <= 30 and stock.inst_rank <= 30:
-                    score += 20
+                    score += 15
                     signals.append("⭐동반매수")
 
-            # 공매도 비중
+            # === 4. 가격 모멘텀 (-5 ~ +25점) ===
+            if symbol in momentum_cache:
+                m = momentum_cache[symbol]
+                score += m['momentum_score']
+                if m['trend'] == 'strong_up':
+                    signals.append(f"📈강한상승({m['price_change_5d']:+.1f}%)")
+                elif m['trend'] == 'up':
+                    signals.append(f"📈상승추세({m['price_change_5d']:+.1f}%)")
+                elif m['trend'] == 'down':
+                    signals.append("📉하락추세")
+
+            # === 5. 거래량 급증 (0 ~ +15점) ===
+            if symbol in volume_cache:
+                v = volume_cache[symbol]
+                score += v['volume_score']
+                if v['vol_change_pct'] > 100:
+                    signals.append(f"🔥거래량폭증({v['vol_change_pct']:+.0f}%)")
+                elif v['vol_change_pct'] > 50:
+                    signals.append(f"📊거래량급증({v['vol_change_pct']:+.0f}%)")
+
+            # === 6. 시가총액 필터 (-5 ~ +10점) ===
+            if symbol in cap_cache:
+                c = cap_cache[symbol]
+                score += c['cap_score']
+                stock.market_cap = c['market_cap']
+
+            # === 7. 공매도 비중 (-10 ~ +10점) ===
             short_ratio = short_dict.get(symbol, 0)
             stock.short_ratio = short_ratio
 
             if short_ratio > 0:
-                if short_ratio <= 5:
+                if short_ratio <= 3:
                     score += 10
+                    signals.append("✅공매도 매우낮음")
+                elif short_ratio <= 5:
+                    score += 5
                     signals.append("📈공매도 낮음")
-                elif short_ratio >= 20:
+                elif short_ratio >= 25:
                     score -= 10
+                    signals.append("⚠️공매도 매우높음")
+                elif short_ratio >= 15:
+                    score -= 5
                     signals.append("⚠️공매도 높음")
 
             stock.score = score
@@ -133,16 +432,23 @@ class KoreanStockRecommender:
         # DataFrame 변환 및 정렬
         records = []
         for symbol, stock in stocks.items():
-            if stock.score > 0:  # 점수가 있는 종목만
+            if stock.score > 0:
+                cap_조 = round(stock.market_cap / 1e12, 1) if stock.market_cap else '-'
+                momentum = momentum_cache.get(symbol, {})
+                volume = volume_cache.get(symbol, {})
+
                 records.append({
                     'symbol': stock.symbol,
                     'name': stock.name,
-                    'score': stock.score,
+                    'score': round(stock.score, 1),
                     'foreign_rank': stock.foreign_rank or '-',
-                    'foreign_억': int(stock.foreign_amount / 100000000) if stock.foreign_amount else 0,
+                    'foreign_억': int(stock.foreign_amount / 1e8) if stock.foreign_amount else 0,
                     'inst_rank': stock.inst_rank or '-',
-                    'inst_억': int(stock.inst_amount / 100000000) if stock.inst_amount else 0,
+                    'inst_억': int(stock.inst_amount / 1e8) if stock.inst_amount else 0,
                     'short_ratio': round(stock.short_ratio, 1),
+                    'price_change_5d': momentum.get('price_change_5d', 0),
+                    'vol_change_pct': volume.get('vol_change_pct', 0),
+                    'market_cap_조': cap_조,
                     'signals': ', '.join(stock.signals) if stock.signals else '',
                 })
 
@@ -151,7 +457,8 @@ class KoreanStockRecommender:
             result = result.sort_values('score', ascending=False).head(top_n)
             result['rank'] = range(1, len(result) + 1)
             result = result[['rank', 'symbol', 'name', 'score', 'signals',
-                           'foreign_rank', 'foreign_억', 'inst_rank', 'inst_억', 'short_ratio']]
+                           'foreign_rank', 'foreign_억', 'inst_rank', 'inst_억',
+                           'short_ratio', 'price_change_5d', 'vol_change_pct', 'market_cap_조']]
 
         return result
 
@@ -162,14 +469,12 @@ class KoreanStockRecommender:
         if recommendations.empty:
             return pd.DataFrame()
 
-        # 동반매수 시그널이 있는 종목만 필터
         dual = recommendations[recommendations['signals'].str.contains('동반매수', na=False)]
         return dual
 
     def get_contrarian_picks(self, market: str = "KOSPI") -> pd.DataFrame:
         """
         역발상 매수 후보 - 공매도 비중 높지만 외국인/기관이 매수하는 종목.
-        (숏 스퀴즈 가능성)
         """
         foreign_df = self.scraper.get_foreign_buying(50)
         inst_df = self.scraper.get_institution_buying(50)
@@ -178,24 +483,20 @@ class KoreanStockRecommender:
         if short_df.empty:
             return pd.DataFrame()
 
-        # 공매도 비중 높은 종목 (15% 이상)
         high_short = short_df[short_df['short_ratio'] >= 15].copy()
 
         if high_short.empty:
             return pd.DataFrame()
 
-        # 외국인/기관 매수 종목과 교집합
         foreign_symbols = set(foreign_df['symbol'].tolist()) if not foreign_df.empty else set()
         inst_symbols = set(inst_df['symbol'].tolist()) if not inst_df.empty else set()
         buying_symbols = foreign_symbols | inst_symbols
 
-        # 공매도 높지만 매수세 유입
         contrarian = high_short[high_short['symbol'].isin(buying_symbols)].copy()
 
         if contrarian.empty:
             return pd.DataFrame()
 
-        # 외국인/기관 매수 정보 추가
         contrarian['외국인매수'] = contrarian['symbol'].apply(
             lambda x: '✓' if x in foreign_symbols else ''
         )
@@ -226,17 +527,10 @@ class KoreanStockRecommender:
         return self.scraper.get_accumulation_signals(market, top_n)
 
     def get_strong_buy_candidates(self, market: str = "KOSPI", top_n: int = 10) -> dict:
-        """강력 매수 후보 - 수급 추천 + 매집 신호 결합.
-
-        양쪽 조건을 모두 만족하는 종목을 강력 매수 후보로 추천.
-        """
-        # 수급 기반 추천
+        """강력 매수 후보 - 수급 추천 + 매집 신호 결합."""
         recommendations = self.get_recommendations(market, 30)
-
-        # 매집 신호
         accumulation = self.get_accumulation_signals(market, 30)
 
-        # 양쪽에 모두 등장하는 종목 = 강력 추천
         strong_picks = []
         if not recommendations.empty and not accumulation.empty:
             rec_symbols = set(recommendations['symbol'].tolist())
@@ -260,7 +554,6 @@ class KoreanStockRecommender:
                     'vol_change_pct': acc_row['vol_change_pct'],
                 })
 
-        # 정렬
         strong_picks = sorted(strong_picks, key=lambda x: x['combined_score'], reverse=True)[:top_n]
 
         return {
@@ -279,7 +572,7 @@ if __name__ == "__main__":
     recommender = KoreanStockRecommender()
 
     print("\n" + "="*60)
-    print("[종목 추천 분석] 외국인/기관/공매도 종합")
+    print("[종목 추천 분석] 외국인/기관/공매도/모멘텀/거래량 종합")
     print("="*60)
 
     print("\n[종합 추천 TOP 10]")
@@ -289,7 +582,7 @@ if __name__ == "__main__":
         for _, row in recs.iterrows():
             signals = row['signals'].replace('🌍', '[외]').replace('🏛️', '[기]').replace('⭐', '[*]').replace('📈', '[+]').replace('⚠️', '[!]')
             print(f"{row['rank']:2}. {row['name']:12} ({row['symbol']}) "
-                  f"점수:{row['score']:3} | {signals}")
+                  f"점수:{row['score']:5.1f} | {signals}")
     else:
         print("데이터 없음")
 
