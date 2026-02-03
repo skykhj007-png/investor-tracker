@@ -35,6 +35,12 @@ st.set_page_config(
     layout="wide",
 )
 
+# Auto refresh every 5 minutes (300 seconds)
+st.markdown(
+    '<meta http-equiv="refresh" content="300">',
+    unsafe_allow_html=True,
+)
+
 # Initialize
 @st.cache_resource
 def get_scraper():
