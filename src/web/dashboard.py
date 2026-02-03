@@ -15,17 +15,23 @@ import src.scrapers.korean_stocks as korean_stocks_module
 import src.analyzers.korean_recommender as korean_recommender_module
 import src.scrapers.pension_etf as pension_etf_module
 import src.analyzers.pension_recommender as pension_recommender_module
+import src.scrapers.crypto as crypto_module
+import src.analyzers.crypto_recommender as crypto_recommender_module
 importlib.reload(korean_stocks_module)
 importlib.reload(korean_recommender_module)
 importlib.reload(pension_etf_module)
 importlib.reload(pension_recommender_module)
+importlib.reload(crypto_module)
+importlib.reload(crypto_recommender_module)
 
 from src.scrapers.dataroma import DataromaScraper
 from src.scrapers.korean_stocks import KoreanStocksScraper
+from src.scrapers.crypto import CryptoScraper
 from src.analyzers.overlap import OverlapAnalyzer
 from src.analyzers.changes import ChangesAnalyzer
 from src.analyzers.korean_recommender import KoreanStockRecommender
 from src.analyzers.pension_recommender import PensionRecommender
+from src.analyzers.crypto_recommender import CryptoRecommender
 from src.storage.database import Database
 
 # Page config
@@ -66,12 +72,18 @@ def get_recommender():
 def get_pension_recommender():
     return PensionRecommender()
 
+def get_crypto_scraper():
+    return CryptoScraper()
+
+def get_crypto_recommender():
+    return CryptoRecommender()
+
 
 # Sidebar
 st.sidebar.title("📊 Investor Tracker")
 page = st.sidebar.radio(
     "메뉴",
-    ["🏠 홈", "💼 포트폴리오", "🔍 공통 종목", "📈 변화 분석", "🌐 Grand Portfolio", "🇰🇷 국내주식", "🎯 종목 추천", "💰 연금저축"]
+    ["🏠 홈", "💼 포트폴리오", "🔍 공통 종목", "📈 변화 분석", "🌐 Grand Portfolio", "🇰🇷 국내주식", "🎯 종목 추천", "💰 연금저축", "🪙 현물코인"]
 )
 
 # 페이지 전환 시 상태 초기화
@@ -991,6 +1003,308 @@ elif page == "💰 연금저축":
     # Disclaimer
     st.markdown("---")
     st.caption("⚠️ **투자 유의사항**: 이 추천은 참고용이며 투자 권유가 아닙니다. 연금저축 투자는 장기 관점에서 신중하게 결정하세요.")
+
+
+# Crypto page
+elif page == "🪙 현물코인":
+    st.title("🪙 현물코인 시세 및 분석")
+
+    crypto_scraper = get_crypto_scraper()
+    crypto_recommender = get_crypto_recommender()
+
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📊 시세 현황", "🔥 급등/급락", "📈 거래량 급증", "🔧 기술적 분석", "🏆 종합 추천"
+    ])
+
+    with tab1:
+        st.subheader("거래대금 상위 코인")
+
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            exchange = st.radio("거래소", ["업비트 (KRW)", "바이낸스 (USDT)"], key="t1_exchange")
+            ex_key = "upbit" if "업비트" in exchange else "binance"
+        with col2:
+            top_n = st.slider("종목 수", 10, 50, 30, key="t1_topn")
+
+        with st.spinner("시세 데이터 로딩..."):
+            top_coins = crypto_scraper.get_top_coins(ex_key, top_n)
+
+        if not top_coins.empty:
+            # 주요 지표
+            col1, col2, col3, col4 = st.columns(4)
+            first = top_coins.iloc[0]
+            second = top_coins.iloc[1] if len(top_coins) > 1 else first
+
+            if ex_key == "upbit":
+                col1.metric(first['name'], f"{first['price']:,.0f}원", f"{first['change_rate']:+.2f}%")
+                col2.metric(second['name'], f"{second['price']:,.0f}원", f"{second['change_rate']:+.2f}%")
+                col3.metric("상위 코인 수", f"{len(top_coins)}개")
+                avg_change = top_coins['change_rate'].mean()
+                col4.metric("평균 변동률", f"{avg_change:+.2f}%")
+            else:
+                col1.metric(first['name'], f"${first['price']:,.2f}", f"{first['change_rate']:+.2f}%")
+                col2.metric(second['name'], f"${second['price']:,.2f}", f"{second['change_rate']:+.2f}%")
+                col3.metric("상위 코인 수", f"{len(top_coins)}개")
+                avg_change = top_coins['change_rate'].mean()
+                col4.metric("평균 변동률", f"{avg_change:+.2f}%")
+
+            # 차트
+            fig = px.bar(
+                top_coins.head(20),
+                x='name',
+                y='change_rate',
+                title=f"{'업비트' if ex_key == 'upbit' else '바이낸스'} 상위 코인 24시간 변동률",
+                color='change_rate',
+                color_continuous_scale="RdYlGn",
+            )
+            fig.update_layout(xaxis_tickangle=-45)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # 테이블
+            if ex_key == "upbit":
+                display_cols = ['rank', 'symbol', 'name', 'price', 'change_rate', 'trade_value_억']
+                display_df = top_coins[display_cols].copy()
+                display_df.columns = ['순위', '심볼', '코인명', '현재가(원)', '변동률(%)', '거래대금(억)']
+            else:
+                display_cols = ['rank', 'base', 'name', 'price', 'change_rate', 'quote_volume_만달러']
+                display_df = top_coins[display_cols].copy()
+                display_df.columns = ['순위', '심볼', '코인명', '현재가($)', '변동률(%)', '거래대금(만$)']
+
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+        else:
+            st.warning("시세 데이터를 가져올 수 없습니다.")
+
+    with tab2:
+        st.subheader("24시간 급등/급락 코인")
+
+        exchange2 = st.radio("거래소", ["업비트 (KRW)", "바이낸스 (USDT)"], key="t2_exchange", horizontal=True)
+        ex_key2 = "upbit" if "업비트" in exchange2 else "binance"
+
+        with st.spinner("데이터 분석 중..."):
+            movers = crypto_scraper.get_movers(ex_key2, 10)
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("### 📈 급등 코인 TOP 10")
+            gainers = movers.get('gainers', pd.DataFrame())
+            if not gainers.empty:
+                fig = px.bar(
+                    gainers,
+                    x='name',
+                    y='change_rate',
+                    title="급등 코인",
+                    color='change_rate',
+                    color_continuous_scale="Greens",
+                )
+                fig.update_layout(xaxis_tickangle=-45)
+                st.plotly_chart(fig, use_container_width=True)
+
+                for _, row in gainers.iterrows():
+                    price_str = f"{row['price']:,.0f}원" if ex_key2 == "upbit" else f"${row['price']:,.4f}"
+                    st.markdown(f"**{row['name']}** | {price_str} | {row['change_rate']:+.2f}%")
+            else:
+                st.info("데이터 없음")
+
+        with col2:
+            st.markdown("### 📉 급락 코인 TOP 10")
+            losers = movers.get('losers', pd.DataFrame())
+            if not losers.empty:
+                fig = px.bar(
+                    losers,
+                    x='name',
+                    y='change_rate',
+                    title="급락 코인",
+                    color='change_rate',
+                    color_continuous_scale="Reds_r",
+                )
+                fig.update_layout(xaxis_tickangle=-45)
+                st.plotly_chart(fig, use_container_width=True)
+
+                for _, row in losers.iterrows():
+                    price_str = f"{row['price']:,.0f}원" if ex_key2 == "upbit" else f"${row['price']:,.4f}"
+                    st.markdown(f"**{row['name']}** | {price_str} | {row['change_rate']:+.2f}%")
+            else:
+                st.info("데이터 없음")
+
+    with tab3:
+        st.subheader("거래량 급증 코인")
+        st.markdown("*최근 거래량이 7일 평균 대비 급증한 코인*")
+
+        exchange3 = st.radio("거래소", ["업비트 (KRW)", "바이낸스 (USDT)"], key="t3_exchange", horizontal=True)
+        ex_key3 = "upbit" if "업비트" in exchange3 else "binance"
+
+        with st.spinner("거래량 분석 중... (최대 1분 소요)"):
+            vol_surge = crypto_recommender.get_volume_surge_coins(ex_key3, 15)
+
+        if not vol_surge.empty:
+            fig = px.bar(
+                vol_surge,
+                x='name',
+                y='vol_change_pct',
+                title="거래량 급증 코인",
+                color='vol_change_pct',
+                color_continuous_scale="YlOrRd",
+            )
+            fig.update_layout(xaxis_tickangle=-45)
+            st.plotly_chart(fig, use_container_width=True)
+
+            for _, row in vol_surge.iterrows():
+                with st.expander(f"{row['rank']}. {row['name']} ({row['symbol']}) - 거래량 {row['vol_change_pct']:+.0f}%"):
+                    col1, col2, col3 = st.columns(3)
+                    price_str = f"{row['price']:,.0f}원" if ex_key3 == "upbit" else f"${row['price']:,.4f}"
+                    col1.metric("현재가", price_str)
+                    col2.metric("24h 변동", f"{row['change_24h']:+.2f}%")
+                    col3.metric("거래량 변화", f"{row['vol_change_pct']:+.0f}%")
+                    st.markdown(f"**신호**: {row['signals']}")
+        else:
+            st.info("현재 거래량 급증 코인이 없습니다.")
+
+    with tab4:
+        st.subheader("개별 코인 기술적 분석")
+
+        exchange4 = st.radio("거래소", ["업비트 (KRW)", "바이낸스 (USDT)"], key="t4_exchange", horizontal=True)
+        ex_key4 = "upbit" if "업비트" in exchange4 else "binance"
+
+        # 코인 선택
+        with st.spinner("코인 목록 로딩..."):
+            coins = crypto_scraper.get_top_coins(ex_key4, 30)
+
+        if not coins.empty:
+            if ex_key4 == "upbit":
+                coin_options = {f"{row['name']} ({row['symbol']})": row['market'] for _, row in coins.iterrows()}
+            else:
+                coin_options = {f"{row['name']} ({row['base']})": row['symbol'] for _, row in coins.iterrows()}
+
+            selected_coin = st.selectbox("코인 선택", list(coin_options.keys()))
+            market_id = coin_options[selected_coin]
+
+            with st.spinner("기술적 분석 중..."):
+                analysis = crypto_recommender.get_technical_analysis(market_id, ex_key4)
+
+            if 'error' not in analysis:
+                # 지표 표시
+                col1, col2, col3, col4 = st.columns(4)
+                price_str = f"{analysis['price']:,.0f}원" if ex_key4 == "upbit" else f"${analysis['price']:,.4f}"
+                col1.metric("현재가", price_str)
+                col2.metric("MA5", f"{analysis['ma5']:,.0f}" if ex_key4 == "upbit" else f"${analysis['ma5']:,.4f}")
+                col3.metric("MA20", f"{analysis['ma20']:,.0f}" if ex_key4 == "upbit" else f"${analysis['ma20']:,.4f}")
+
+                rsi_val = analysis['rsi']
+                rsi_label = "과매수" if rsi_val > 70 else "과매도" if rsi_val < 30 else "중립"
+                col4.metric(f"RSI ({rsi_label})", f"{rsi_val:.1f}")
+
+                # 신호
+                if analysis['signals']:
+                    st.info("**분석 신호**: " + ", ".join(analysis['signals']))
+
+                # 캔들차트 + MA
+                candles = analysis.get('candles', pd.DataFrame())
+                if not candles.empty:
+                    fig = go.Figure()
+
+                    fig.add_trace(go.Candlestick(
+                        x=candles['date'],
+                        open=candles['open'], high=candles['high'],
+                        low=candles['low'], close=candles['close'],
+                        name="가격"
+                    ))
+
+                    if 'ma5' in candles.columns:
+                        fig.add_trace(go.Scatter(
+                            x=candles['date'], y=candles['ma5'],
+                            name='MA5', line=dict(color='orange', width=1.5)
+                        ))
+                    if 'ma20' in candles.columns:
+                        fig.add_trace(go.Scatter(
+                            x=candles['date'], y=candles['ma20'],
+                            name='MA20', line=dict(color='blue', width=1.5)
+                        ))
+
+                    fig.update_layout(
+                        title=f"{analysis['name']} 일봉 차트",
+                        xaxis_rangeslider_visible=False,
+                        height=500,
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+                    # RSI 차트
+                    rsi_values = []
+                    for i in range(14, len(candles)):
+                        r = crypto_recommender._calculate_rsi(candles['close'].iloc[:i+1])
+                        rsi_values.append({'date': candles['date'].iloc[i], 'RSI': r})
+
+                    if rsi_values:
+                        rsi_df = pd.DataFrame(rsi_values)
+                        fig_rsi = px.line(rsi_df, x='date', y='RSI', title='RSI (14일)')
+                        fig_rsi.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="과매수")
+                        fig_rsi.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="과매도")
+                        fig_rsi.update_layout(height=300)
+                        st.plotly_chart(fig_rsi, use_container_width=True)
+            else:
+                st.warning("분석 데이터를 가져올 수 없습니다.")
+        else:
+            st.warning("코인 목록을 가져올 수 없습니다.")
+
+    with tab5:
+        st.subheader("종합 추천 코인")
+        st.markdown("*모멘텀 + 거래량 + 기술적 분석 종합 점수*")
+
+        exchange5 = st.radio("거래소", ["업비트 (KRW)", "바이낸스 (USDT)"], key="t5_exchange", horizontal=True)
+        ex_key5 = "upbit" if "업비트" in exchange5 else "binance"
+
+        st.info("""
+        **점수 산정 기준 (최대 ~100점):**
+        - 모멘텀 (24h/5일 변화율): 최대 25점
+        - 거래량 급증: 최대 20점
+        - 기술적 분석 (MA/RSI): 최대 25점
+        - 거래대금 순위: 최대 15점
+        - 추세 지속성 (연속양봉): 최대 15점
+        """)
+
+        with st.spinner("종합 분석 중... (최대 2분 소요)"):
+            recommendations = crypto_recommender.get_recommendations(ex_key5, 20)
+
+        if not recommendations.empty:
+            # 점수 차트
+            fig = px.bar(
+                recommendations.head(15),
+                x='name',
+                y='score',
+                title=f"{'업비트' if ex_key5 == 'upbit' else '바이낸스'} 종합 추천 TOP 15",
+                color='score',
+                color_continuous_scale="Bluered",
+                hover_data=['symbol', 'change_24h', 'rsi'],
+            )
+            fig.update_layout(xaxis_tickangle=-45)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # 상세 카드
+            st.subheader("📋 추천 상세")
+            for _, row in recommendations.head(10).iterrows():
+                with st.expander(f"{row['rank']}. {row['name']} ({row['symbol']}) - 점수: {row['score']}"):
+                    col1, col2, col3, col4 = st.columns(4)
+                    price_str = f"{row['price']:,.0f}원" if ex_key5 == "upbit" else f"${row['price']:,.4f}"
+                    col1.metric("현재가", price_str)
+                    col2.metric("24h 변동", f"{row['change_24h']:+.2f}%")
+                    col3.metric("RSI", f"{row['rsi']:.0f}")
+                    col4.metric("총점", f"{row['score']:.1f}")
+
+                    st.markdown(f"**모멘텀**: {row['momentum_score']}점 | **거래량**: {row['volume_score']}점 | **기술적**: {row['technical_score']}점")
+                    st.markdown(f"**신호**: {row['signals']}")
+
+            # 전체 테이블
+            st.subheader("📊 전체 추천 목록")
+            display_df = recommendations[['rank', 'symbol', 'name', 'price', 'change_24h',
+                                         'score', 'rsi', 'vol_change_pct', 'signals']].copy()
+            display_df.columns = ['순위', '심볼', '코인명', '현재가', '24h(%)', '점수', 'RSI', '거래량변화(%)', '신호']
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+        else:
+            st.warning("추천 데이터를 가져올 수 없습니다.")
+
+    # Disclaimer
+    st.markdown("---")
+    st.caption("⚠️ **투자 유의사항**: 이 추천은 참고용이며 투자 권유가 아닙니다. 암호화폐는 높은 변동성을 가지므로 투자에 주의하세요.")
 
 
 # Footer
