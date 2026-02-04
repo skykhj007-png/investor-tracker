@@ -6,25 +6,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 import sys
-import importlib
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
-# Force reload modules to avoid stale class definitions
-import src.scrapers.dataroma as dataroma_module
-import src.scrapers.korean_stocks as korean_stocks_module
-import src.analyzers.korean_recommender as korean_recommender_module
-import src.scrapers.pension_etf as pension_etf_module
-import src.analyzers.pension_recommender as pension_recommender_module
-import src.scrapers.crypto as crypto_module
-import src.analyzers.crypto_recommender as crypto_recommender_module
-importlib.reload(dataroma_module)
-importlib.reload(korean_stocks_module)
-importlib.reload(korean_recommender_module)
-importlib.reload(pension_etf_module)
-importlib.reload(pension_recommender_module)
-importlib.reload(crypto_module)
-importlib.reload(crypto_recommender_module)
 
 from src.scrapers.dataroma import DataromaScraper
 from src.scrapers.korean_stocks import KoreanStocksScraper
