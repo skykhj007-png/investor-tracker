@@ -503,30 +503,18 @@ class KrxDataScraper:
 
 
 class DartScraper:
-    """DART 전자공시 스크래퍼."""
+    """DART 전자공시 스크래퍼 (HTML 파싱 방식)."""
 
     BASE_URL = "https://dart.fss.or.kr"
 
-    REPORT_TYPES = {
-        'major_holdings': 'B001',   # 대량보유상황보고서
-        'annual': 'A001',           # 사업보고서
-        'semi_annual': 'A002',      # 반기보고서
-        'quarterly': 'A003',        # 분기보고서
-        'major_events': 'C',        # 주요사항보고서
-        'fair_disclosure': 'D',     # 공정공시
-        'other': 'E',               # 기타공시
-        'audit': 'F',               # 외부감사관련
-    }
-
-    REPORT_TYPE_LABELS = {
-        'B001': '대량보유',
-        'A001': '사업보고서',
-        'A002': '반기보고서',
-        'A003': '분기보고서',
-        'C': '주요사항',
-        'D': '공정공시',
-        'E': '기타공시',
-        'F': '외부감사',
+    # DART 공시유형 코드 (publicType 파라미터)
+    PUBLIC_TYPE_CODES = {
+        '대량보유': 'B001',
+        '주요사항': 'C001',
+        '공정공시': 'D001',
+        '사업보고서': 'A001',
+        '반기보고서': 'A002',
+        '분기보고서': 'A003',
     }
 
     def __init__(self):
@@ -534,54 +522,128 @@ class DartScraper:
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         })
+        self._initialized = False
 
-    def _search_disclosures(self, days: int = 7, report_type: str = '',
-                             company_name: str = '', max_results: int = 50) -> pd.DataFrame:
-        """DART 공시 범용 검색."""
+    def _ensure_session(self):
+        """세션 초기화 (쿠키 획득)."""
+        if not self._initialized:
+            try:
+                self.session.get(f"{self.BASE_URL}/dsab001/main.do", timeout=15)
+                self._initialized = True
+            except Exception:
+                pass
+
+    def _parse_html_table(self, html: str) -> pd.DataFrame:
+        """DART 검색 결과 HTML 테이블을 파싱."""
+        soup = BeautifulSoup(html, 'html.parser')
+        table = soup.find('table')
+
+        if not table:
+            return pd.DataFrame(columns=['date', 'company', 'report_type', 'title', 'url'])
+
+        records = []
+        rows = table.find_all('tr')
+
+        for row in rows[1:]:  # 헤더 행 스킵
+            cols = row.find_all('td')
+            if len(cols) < 5:
+                continue
+
+            # "조회 결과가 없습니다" 체크
+            text = row.get_text(strip=True)
+            if '결과가 없습니다' in text:
+                break
+
+            # 컬럼: 번호 | 공시대상회사 | 보고서명 | 제출인 | 접수일자 | 비고
+            company_text = cols[1].get_text(strip=True)
+            # 회사명에서 시장 접두사 제거 (유=유가, 코=코스닥, 기=기타)
+            if company_text and company_text[0] in ('유', '코', '기', '넥', '콘'):
+                company_text = company_text[1:]
+
+            title_text = cols[2].get_text(strip=True)
+            date_text = cols[4].get_text(strip=True).replace('.', '')
+
+            # 보고서 링크 추출
+            link = cols[2].find('a')
+            url = ''
+            if link and link.get('href'):
+                href = link['href']
+                if href.startswith('/'):
+                    url = f"{self.BASE_URL}{href}"
+                else:
+                    url = href
+
+            # 보고서 유형 추출
+            report_type = ''
+            if '대량보유' in title_text:
+                report_type = '대량보유'
+            elif '주요사항' in title_text:
+                report_type = '주요사항'
+            elif '공정공시' in title_text or '풍문' in title_text:
+                report_type = '공정공시'
+            elif '사업보고서' in title_text:
+                report_type = '사업보고서'
+            elif '반기보고서' in title_text:
+                report_type = '반기보고서'
+            elif '분기보고서' in title_text:
+                report_type = '분기보고서'
+            elif '증권신고' in title_text:
+                report_type = '증권신고'
+            elif '합병' in title_text or '분할' in title_text:
+                report_type = '합병/분할'
+            else:
+                report_type = title_text.split('(')[0][:8] if '(' in title_text else title_text[:8]
+
+            records.append({
+                'date': date_text,
+                'company': company_text,
+                'report_type': report_type,
+                'title': title_text,
+                'url': url,
+            })
+
+        return pd.DataFrame(records) if records else pd.DataFrame(columns=['date', 'company', 'report_type', 'title', 'url'])
+
+    def _search_disclosures(self, days: int = 7, public_types: list = None,
+                             company_name: str = '', max_results: int = 30) -> pd.DataFrame:
+        """DART 공시 범용 검색 (HTML 파싱)."""
+        self._ensure_session()
+
         end_date = datetime.now()
         start_date = end_date - timedelta(days=days)
 
         search_url = f"{self.BASE_URL}/dsab001/search.ax"
 
-        data = {
-            'currentPage': 1,
-            'maxResults': max_results,
-            'maxLinks': 10,
-            'sort': 'date',
-            'series': 'desc',
-            'textCrpNm': company_name,
-            'startDate': start_date.strftime('%Y%m%d'),
-            'endDate': end_date.strftime('%Y%m%d'),
-            'reportType': report_type,
-        }
+        # publicType을 쿼리스트링으로 구성 (다중 값 지원)
+        if not public_types:
+            public_types = ['B001']  # 기본값 (비어있으면 에러)
+
+        params = (
+            f"currentPage=1&maxResults={max_results}&maxLinks=10"
+            f"&sort=date&series=desc"
+            f"&textCrpCik=&textCrpNm={company_name}"
+            f"&startDate={start_date.strftime('%Y%m%d')}"
+            f"&endDate={end_date.strftime('%Y%m%d')}"
+            f"&pageGubun=corp"
+        )
+
+        for pt in public_types:
+            params += f"&publicType={pt}"
 
         try:
-            resp = self.session.post(search_url, data=data, timeout=30)
+            resp = self.session.post(
+                search_url,
+                data=params,
+                timeout=30,
+                headers={
+                    'Referer': f'{self.BASE_URL}/dsab001/main.do',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                }
+            )
 
-            if resp.headers.get('content-type', '').startswith('application/json'):
-                result = resp.json()
-                records = []
-
-                for item in result.get('list', []):
-                    report_nm = item.get('report_nm', '')
-                    type_label = self.REPORT_TYPE_LABELS.get(report_type, '')
-                    if not type_label and report_nm:
-                        for code, label in self.REPORT_TYPE_LABELS.items():
-                            if label in report_nm:
-                                type_label = label
-                                break
-                        if not type_label:
-                            type_label = report_nm.split('(')[0][:10] if '(' in report_nm else report_nm[:10]
-
-                    records.append({
-                        'date': item.get('rcept_dt', ''),
-                        'company': item.get('corp_name', ''),
-                        'report_type': type_label,
-                        'title': report_nm,
-                        'url': f"{self.BASE_URL}/dsaf001/main.do?rcpNo={item.get('rcept_no', '')}",
-                    })
-
-                return pd.DataFrame(records)
+            if resp.status_code == 200 and len(resp.text) > 1000:
+                return self._parse_html_table(resp.text)
 
             return pd.DataFrame(columns=['date', 'company', 'report_type', 'title', 'url'])
 
@@ -591,29 +653,24 @@ class DartScraper:
 
     def get_major_holdings(self, days: int = 7) -> pd.DataFrame:
         """최근 대량보유 공시 조회 (5% 이상 지분 변동)."""
-        return self._search_disclosures(days=days, report_type='B001')
+        return self._search_disclosures(days=days, public_types=['B001'])
 
     def get_recent_disclosures(self, days: int = 7, report_types: list = None) -> pd.DataFrame:
-        """최근 주요 공시 조회. report_types가 None이면 대량보유+주요사항+공정공시."""
+        """최근 주요 공시 조회. report_types가 None이면 주요사항+대량보유+공정공시."""
         if report_types is None:
-            report_types = ['B001', 'C', 'D']
+            report_types = ['B001', 'C001', 'D001']
 
-        all_records = []
-        for rt in report_types:
-            df = self._search_disclosures(days=days, report_type=rt, max_results=30)
-            if not df.empty:
-                all_records.append(df)
-
-        if not all_records:
-            return pd.DataFrame(columns=['date', 'company', 'report_type', 'title', 'url'])
-
-        combined = pd.concat(all_records, ignore_index=True)
-        combined = combined.sort_values('date', ascending=False).reset_index(drop=True)
-        return combined
+        # 여러 타입을 한번에 요청
+        return self._search_disclosures(days=days, public_types=report_types, max_results=50)
 
     def search_company_disclosures(self, company_name: str, days: int = 30) -> pd.DataFrame:
         """특정 기업의 최근 공시 검색."""
-        return self._search_disclosures(days=days, company_name=company_name, max_results=30)
+        return self._search_disclosures(
+            days=days,
+            company_name=company_name,
+            public_types=['B001', 'C001', 'D001', 'A001'],
+            max_results=30
+        )
 
     def get_disclosures_for_stocks(self, stock_names: list, days: int = 14) -> pd.DataFrame:
         """추천 종목들의 최근 공시 일괄 조회."""

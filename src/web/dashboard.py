@@ -75,6 +75,15 @@ st.markdown("""
     stroke: white !important;
 }
 
+/* 메뉴 버튼에 텍스트 추가 (모든 화면) */
+[data-testid="collapsedControl"]::after {
+    content: " 메뉴" !important;
+    color: white !important;
+    font-size: 14px !important;
+    font-weight: bold !important;
+    margin-left: 4px !important;
+}
+
 /* 모바일에서 메뉴 버튼 더 크게 */
 @media (max-width: 768px) {
     [data-testid="collapsedControl"] {
@@ -85,13 +94,19 @@ st.markdown("""
         padding: 12px 16px !important;
         font-size: 18px !important;
     }
-    [data-testid="collapsedControl"]::after {
-        content: " 메뉴" !important;
-        color: white !important;
-        font-size: 14px !important;
-        font-weight: bold !important;
-        margin-left: 4px !important;
-    }
+}
+
+/* 로딩 스피너 중앙 강조 */
+.stSpinner {
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    min-height: 120px !important;
+}
+.stSpinner > div {
+    font-size: 18px !important;
+    font-weight: 600 !important;
+    color: #FF4B4B !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -265,6 +280,27 @@ if page == "🏠 홈":
 # Portfolio page
 elif page == "💼 포트폴리오":
     st.title("💼 투자자 포트폴리오")
+
+    # 주요 투자자 설명
+    FAMOUS_INVESTORS = {
+        'BRK': ('워렌 버핏', 'Berkshire Hathaway CEO. "가치투자의 아버지". 장기 우량주 집중 투자.'),
+        'icahn': ('칼 아이칸', '행동주의 투자자. 저평가 기업 인수 후 경영 개선 요구.'),
+        'soros': ('조지 소로스', '헤지펀드의 전설. 매크로 전략, "영란은행을 무너뜨린 남자".'),
+        'BRIDGEWATER': ('레이 달리오', 'Bridgewater Associates 설립자. 올웨더 포트폴리오 전략.'),
+        'einhorn': ('데이비드 아인혼', 'Greenlight Capital. 가치투자 + 숏 셀링 전문.'),
+        'ackman': ('빌 애크먼', 'Pershing Square. 소수 종목 집중 투자.'),
+        'BERKOWITZ': ('브루스 버코위츠', 'Fairholme Fund. 역발상 가치투자.'),
+        'tepper': ('데이비드 테퍼', 'Appaloosa Management. 부실채권·주식 투자.'),
+        'THIRD POINT': ('댄 로브', 'Third Point. 행동주의 + 이벤트 드리븐.'),
+        'BAUPOST': ('세스 클라만', 'Baupost Group. 안전마진 투자 철학.'),
+        'gates': ('빌 게이츠', 'Microsoft 공동창업자. 다양한 산업 분산 투자.'),
+    }
+
+    with st.expander("💡 **주요 슈퍼투자자 소개** (클릭하여 펼치기)", expanded=False):
+        st.markdown("SEC 13F 공시 기반으로 82명의 슈퍼투자자 포트폴리오를 추적합니다.")
+        for inv_id, (name, desc) in FAMOUS_INVESTORS.items():
+            st.markdown(f"- **{name}** (`{inv_id}`) — {desc}")
+        st.caption("위 투자자 외에도 다양한 헤지펀드·기관 투자자의 포트폴리오를 확인할 수 있습니다.")
 
     # Get investor list
     with st.spinner("투자자 목록 로딩..."):
@@ -762,16 +798,16 @@ elif page == "🇰🇷 국내주식":
 
         type_options = {
             '대량보유': 'B001',
-            '주요사항': 'C',
-            '공정공시': 'D',
+            '주요사항': 'C001',
+            '공정공시': 'D001',
             '사업보고서': 'A001',
-            '기타공시': 'E',
+            '분기보고서': 'A003',
         }
         with col_types:
             selected_labels = st.multiselect(
                 "공시 유형",
                 options=list(type_options.keys()),
-                default=['대량보유', '주요사항', '공정공시'],
+                default=['대량보유', '주요사항'],
                 key="dart_types"
             )
 
