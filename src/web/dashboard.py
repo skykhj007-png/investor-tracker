@@ -242,6 +242,9 @@ page = st.sidebar.radio(
     MENU_ITEMS,
     key="nav_menu"
 )
+st.sidebar.markdown("---")
+st.sidebar.markdown("Made with Streamlit")
+st.sidebar.markdown("[GitHub](https://github.com/skykhj007-png/investor-tracker)")
 
 
 # Home page
@@ -360,6 +363,7 @@ if page == "🏠 홈":
 
     st.markdown("---")
     st.caption("데이터는 5분마다 자동 갱신됩니다. 왼쪽 사이드바 또는 위 버튼으로 메뉴를 이동하세요.")
+    st.stop()
 
 
 # Portfolio page
@@ -447,6 +451,7 @@ elif page == "💼 포트폴리오":
             display_df = portfolio.head(top_n)[["symbol", "stock", "percent_portfolio", "shares", "value", "activity"]]
             display_df.columns = ["심볼", "종목명", "비중(%)", "주식수", "가치($)", "최근활동"]
             st.dataframe(display_df, use_container_width=True)
+    st.stop()
 
 
 # Overlap page
@@ -511,6 +516,7 @@ elif page == "🔍 공통 종목":
                 st.warning("분석 결과가 없습니다.")
         else:
             st.info("2명 이상의 투자자를 선택하세요.")
+    st.stop()
 
 
 # Changes page
@@ -573,6 +579,7 @@ elif page == "📈 변화 분석":
             # Full table
             st.subheader("전체 변화 내역")
             st.dataframe(changes, use_container_width=True)
+    st.stop()
 
 
 # Grand Portfolio page
@@ -613,6 +620,7 @@ elif page == "🌐 Grand Portfolio":
         display_df = grand.head(50)[display_cols].copy()
         display_df.columns = col_names
         st.dataframe(display_df, use_container_width=True, hide_index=True)
+    st.stop()
 
 
 # Korean Stocks page
@@ -1046,6 +1054,7 @@ elif page == "🇰🇷 국내주식":
                     else:
                         st.info(f"입력한 종목의 최근 {multi_days}일 공시가 없습니다.")
                         st.caption("💡 DART는 정확한 기업명이 필요합니다. (예: '삼성' → '삼성전자')")
+    st.stop()
 
 
 # Recommendation page
@@ -1198,6 +1207,7 @@ elif page == "🎯 종목 추천":
     # Disclaimer
     st.markdown("---")
     st.caption("⚠️ **투자 유의사항**: 이 추천은 참고용이며 투자 권유가 아닙니다. 투자 결정은 본인의 판단과 책임하에 하시기 바랍니다.")
+    st.stop()
 
 
 # Pension Savings page
@@ -1507,6 +1517,7 @@ elif page == "💰 연금저축":
     # Disclaimer
     st.markdown("---")
     st.caption("⚠️ **투자 유의사항**: 이 추천은 참고용이며 투자 권유가 아닙니다. 연금저축 투자는 장기 관점에서 신중하게 결정하세요.")
+    st.stop()
 
 
 # Crypto page
@@ -1882,9 +1893,4 @@ elif page == "🪙 현물코인":
     # Disclaimer
     st.markdown("---")
     st.caption("⚠️ **투자 유의사항**: 이 추천은 참고용이며 투자 권유가 아닙니다. 암호화폐는 높은 변동성을 가지므로 투자에 주의하세요.")
-
-
-# Footer
-st.sidebar.markdown("---")
-st.sidebar.markdown("Made with Streamlit")
-st.sidebar.markdown("[GitHub](https://github.com)")
+    st.stop()
