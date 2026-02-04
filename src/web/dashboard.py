@@ -10,13 +10,15 @@ import importlib
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-# Force reload Korean stock modules to avoid stale class definitions
+# Force reload modules to avoid stale class definitions
+import src.scrapers.dataroma as dataroma_module
 import src.scrapers.korean_stocks as korean_stocks_module
 import src.analyzers.korean_recommender as korean_recommender_module
 import src.scrapers.pension_etf as pension_etf_module
 import src.analyzers.pension_recommender as pension_recommender_module
 import src.scrapers.crypto as crypto_module
 import src.analyzers.crypto_recommender as crypto_recommender_module
+importlib.reload(dataroma_module)
 importlib.reload(korean_stocks_module)
 importlib.reload(korean_recommender_module)
 importlib.reload(pension_etf_module)
@@ -113,17 +115,13 @@ st.markdown("""
 
 # Initialize
 @st.cache_resource
-def get_scraper():
-    return DataromaScraper()
-
-@st.cache_resource
 def get_database():
     db = Database()
     db.init_db()
     return db
 
-# Create fresh instances (no caching for Korean modules to avoid stale class issues)
-scraper = get_scraper()
+# Fresh instances (no caching to avoid stale class issues)
+scraper = DataromaScraper()
 db = get_database()
 
 # 각 페이지별로 필요한 인스턴스만 지연 생성하는 함수
