@@ -440,7 +440,7 @@ elif page == "🇰🇷 국내주식":
     kr_scraper = get_kr_scraper()
     kr_recommender = get_recommender()
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 외국인/기관 순매수", "📈 시총 상위", "📉 공매도", "💎 매집 신호", "🔍 종목 검색"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 외국인/기관 순매수", "📈 시총 상위", "📉 공매도", "💎 매집 신호", "🔍 종목 검색", "📋 전자공시"])
 
     with tab1:
         st.subheader("투자자별 순매수 상위 종목")
@@ -688,6 +688,82 @@ elif page == "🇰🇷 국내주식":
             else:
                 st.info("검색 결과가 없습니다.")
 
+    with tab6:
+        st.subheader("📋 DART 전자공시")
+        st.markdown("*최근 주요 공시 (대량보유, 주요사항, 공정공시 등)*")
+
+        col_period, col_types = st.columns([1, 3])
+        with col_period:
+            dart_days = st.selectbox("조회 기간", [3, 7, 14, 30], index=1,
+                                      format_func=lambda x: f"최근 {x}일",
+                                      key="dart_days")
+
+        type_options = {
+            '대량보유': 'B001',
+            '주요사항': 'C',
+            '공정공시': 'D',
+            '사업보고서': 'A001',
+            '기타공시': 'E',
+        }
+        with col_types:
+            selected_labels = st.multiselect(
+                "공시 유형",
+                options=list(type_options.keys()),
+                default=['대량보유', '주요사항', '공정공시'],
+                key="dart_types"
+            )
+
+        selected_types = [type_options[label] for label in selected_labels] if selected_labels else None
+
+        with st.spinner("DART 공시 로딩..."):
+            disclosures = kr_scraper.get_recent_disclosures(days=dart_days, report_types=selected_types)
+
+        if not disclosures.empty:
+            st.success(f"총 {len(disclosures)}건의 공시")
+
+            for _, row in disclosures.iterrows():
+                date_str = str(row['date'])
+                if len(date_str) == 8:
+                    date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+                type_badge = f"`{row['report_type']}`" if row.get('report_type') else ""
+                st.markdown(
+                    f"**{date_str}** {type_badge} **{row['company']}** - "
+                    f"[{row['title']}]({row['url']})"
+                )
+        else:
+            st.info("해당 기간의 공시가 없습니다.")
+
+        st.markdown("---")
+        st.subheader("🔍 기업별 공시 검색")
+
+        company_query = st.text_input("기업명 입력", placeholder="삼성전자", key="dart_company_search")
+
+        if company_query:
+            with st.spinner(f"'{company_query}' 공시 검색 중..."):
+                company_disclosures = kr_scraper.search_company_disclosures(company_query, days=30)
+
+            if not company_disclosures.empty:
+                st.success(f"'{company_query}' 관련 공시 {len(company_disclosures)}건")
+
+                display_df = company_disclosures.copy()
+                display_df['공시일'] = display_df['date'].apply(
+                    lambda x: f"{str(x)[:4]}-{str(x)[4:6]}-{str(x)[6:]}" if len(str(x)) == 8 else str(x)
+                )
+                display_df['기업명'] = display_df['company']
+                display_df['유형'] = display_df['report_type']
+                display_df['공시제목'] = display_df['title']
+
+                st.dataframe(
+                    display_df[['공시일', '기업명', '유형', '공시제목']],
+                    use_container_width=True, hide_index=True
+                )
+
+                with st.expander("공시 원문 링크"):
+                    for _, row in company_disclosures.iterrows():
+                        st.markdown(f"- [{row['company']} - {row['title']}]({row['url']})")
+            else:
+                st.info(f"'{company_query}' 관련 최근 30일 공시가 없습니다.")
+
 
 # Recommendation page
 elif page == "🎯 종목 추천":
@@ -751,6 +827,29 @@ elif page == "🎯 종목 추천":
             display_df = recs[available_cols].copy()
             display_df.columns = col_names
             st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+            # 추천 종목 최근 공시
+            st.markdown("---")
+            st.subheader("📋 추천 종목 최근 공시")
+
+            top_stock_names = recs.head(5)['name'].tolist()
+
+            with st.spinner("추천 종목 공시 조회 중..."):
+                rec_kr_scraper = get_kr_scraper()
+                rec_disclosures = rec_kr_scraper.get_disclosures_for_stocks(top_stock_names, days=14)
+
+            if not rec_disclosures.empty:
+                for _, drow in rec_disclosures.head(15).iterrows():
+                    date_str = str(drow['date'])
+                    if len(date_str) == 8:
+                        date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+                    type_badge = f"`{drow['report_type']}`" if drow.get('report_type') else ""
+                    st.markdown(
+                        f"**{date_str}** {type_badge} **{drow['company']}** - "
+                        f"[{drow['title']}]({drow['url']})"
+                    )
+            else:
+                st.info("최근 14일간 추천 종목 관련 공시가 없습니다.")
         else:
             st.warning("추천 데이터를 가져올 수 없습니다.")
 

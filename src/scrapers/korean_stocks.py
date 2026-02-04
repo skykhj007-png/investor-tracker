@@ -503,9 +503,31 @@ class KrxDataScraper:
 
 
 class DartScraper:
-    """DART 대량보유 공시 스크래퍼."""
+    """DART 전자공시 스크래퍼."""
 
     BASE_URL = "https://dart.fss.or.kr"
+
+    REPORT_TYPES = {
+        'major_holdings': 'B001',   # 대량보유상황보고서
+        'annual': 'A001',           # 사업보고서
+        'semi_annual': 'A002',      # 반기보고서
+        'quarterly': 'A003',        # 분기보고서
+        'major_events': 'C',        # 주요사항보고서
+        'fair_disclosure': 'D',     # 공정공시
+        'other': 'E',               # 기타공시
+        'audit': 'F',               # 외부감사관련
+    }
+
+    REPORT_TYPE_LABELS = {
+        'B001': '대량보유',
+        'A001': '사업보고서',
+        'A002': '반기보고서',
+        'A003': '분기보고서',
+        'C': '주요사항',
+        'D': '공정공시',
+        'E': '기타공시',
+        'F': '외부감사',
+    }
 
     def __init__(self):
         self.session = requests.Session()
@@ -513,8 +535,9 @@ class DartScraper:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         })
 
-    def get_major_holdings(self, days: int = 7) -> pd.DataFrame:
-        """최근 대량보유 공시 조회 (5% 이상 지분 변동)."""
+    def _search_disclosures(self, days: int = 7, report_type: str = '',
+                             company_name: str = '', max_results: int = 50) -> pd.DataFrame:
+        """DART 공시 범용 검색."""
         end_date = datetime.now()
         start_date = end_date - timedelta(days=days)
 
@@ -522,14 +545,14 @@ class DartScraper:
 
         data = {
             'currentPage': 1,
-            'maxResults': 50,
+            'maxResults': max_results,
             'maxLinks': 10,
             'sort': 'date',
             'series': 'desc',
-            'textCrpNm': '',
+            'textCrpNm': company_name,
             'startDate': start_date.strftime('%Y%m%d'),
             'endDate': end_date.strftime('%Y%m%d'),
-            'reportType': 'B001',  # 주식등의대량보유상황보고서
+            'reportType': report_type,
         }
 
         try:
@@ -540,20 +563,75 @@ class DartScraper:
                 records = []
 
                 for item in result.get('list', []):
+                    report_nm = item.get('report_nm', '')
+                    type_label = self.REPORT_TYPE_LABELS.get(report_type, '')
+                    if not type_label and report_nm:
+                        for code, label in self.REPORT_TYPE_LABELS.items():
+                            if label in report_nm:
+                                type_label = label
+                                break
+                        if not type_label:
+                            type_label = report_nm.split('(')[0][:10] if '(' in report_nm else report_nm[:10]
+
                     records.append({
                         'date': item.get('rcept_dt', ''),
                         'company': item.get('corp_name', ''),
-                        'title': item.get('report_nm', ''),
+                        'report_type': type_label,
+                        'title': report_nm,
                         'url': f"{self.BASE_URL}/dsaf001/main.do?rcpNo={item.get('rcept_no', '')}",
                     })
 
                 return pd.DataFrame(records)
 
-            return pd.DataFrame(columns=['date', 'company', 'title', 'url'])
+            return pd.DataFrame(columns=['date', 'company', 'report_type', 'title', 'url'])
 
         except Exception as e:
             print(f"DART 조회 오류: {e}")
-            return pd.DataFrame(columns=['date', 'company', 'title', 'url'])
+            return pd.DataFrame(columns=['date', 'company', 'report_type', 'title', 'url'])
+
+    def get_major_holdings(self, days: int = 7) -> pd.DataFrame:
+        """최근 대량보유 공시 조회 (5% 이상 지분 변동)."""
+        return self._search_disclosures(days=days, report_type='B001')
+
+    def get_recent_disclosures(self, days: int = 7, report_types: list = None) -> pd.DataFrame:
+        """최근 주요 공시 조회. report_types가 None이면 대량보유+주요사항+공정공시."""
+        if report_types is None:
+            report_types = ['B001', 'C', 'D']
+
+        all_records = []
+        for rt in report_types:
+            df = self._search_disclosures(days=days, report_type=rt, max_results=30)
+            if not df.empty:
+                all_records.append(df)
+
+        if not all_records:
+            return pd.DataFrame(columns=['date', 'company', 'report_type', 'title', 'url'])
+
+        combined = pd.concat(all_records, ignore_index=True)
+        combined = combined.sort_values('date', ascending=False).reset_index(drop=True)
+        return combined
+
+    def search_company_disclosures(self, company_name: str, days: int = 30) -> pd.DataFrame:
+        """특정 기업의 최근 공시 검색."""
+        return self._search_disclosures(days=days, company_name=company_name, max_results=30)
+
+    def get_disclosures_for_stocks(self, stock_names: list, days: int = 14) -> pd.DataFrame:
+        """추천 종목들의 최근 공시 일괄 조회."""
+        import time
+
+        all_records = []
+        for name in stock_names[:10]:
+            df = self.search_company_disclosures(name, days=days)
+            if not df.empty:
+                all_records.append(df)
+            time.sleep(0.3)
+
+        if not all_records:
+            return pd.DataFrame(columns=['date', 'company', 'report_type', 'title', 'url'])
+
+        combined = pd.concat(all_records, ignore_index=True)
+        combined = combined.sort_values('date', ascending=False).reset_index(drop=True)
+        return combined
 
 
 class CreditBalanceScraper:
@@ -674,6 +752,18 @@ class KoreanStocksScraper:
     def get_accumulation_signals(self, market: str = "KOSPI", top_n: int = 20) -> pd.DataFrame:
         """주식 매집 신호 분석."""
         return self.krx.get_accumulation_signals(market, top_n)
+
+    def get_recent_disclosures(self, days: int = 7, report_types: list = None) -> pd.DataFrame:
+        """최근 주요 공시."""
+        return self.dart.get_recent_disclosures(days, report_types)
+
+    def search_company_disclosures(self, company_name: str, days: int = 30) -> pd.DataFrame:
+        """기업별 공시 검색."""
+        return self.dart.search_company_disclosures(company_name, days)
+
+    def get_disclosures_for_stocks(self, stock_names: list, days: int = 14) -> pd.DataFrame:
+        """추천 종목 공시 일괄 조회."""
+        return self.dart.get_disclosures_for_stocks(stock_names, days)
 
 
 # CLI 테스트
