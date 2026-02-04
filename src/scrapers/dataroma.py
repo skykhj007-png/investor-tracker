@@ -179,39 +179,39 @@ class DataromaScraper:
         for row in rows:
             cols = row.find_all("td")
             if len(cols) >= 4:
-                # Stock name and symbol
-                stock_cell = cols[0]
-                stock_link = stock_cell.find("a")
-                stock_name = stock_link.get_text(strip=True) if stock_link else ""
+                # cols[0]: Symbol (ticker), cols[1]: Stock name
+                # cols[2]: % (percent of total), cols[3]: Ownership count
+                # cols[4]: Hold Price, cols[5]: Max %, cols[6]: Current Price
 
                 # Symbol
-                symbol_span = stock_cell.find("span", {"class": "sym"})
-                if symbol_span:
-                    symbol = symbol_span.get_text(strip=True)
-                else:
-                    href = stock_link.get("href", "") if stock_link else ""
-                    symbol = href.split("s=")[-1].split("&")[0] if "s=" in href else ""
+                symbol_cell = cols[0]
+                symbol_link = symbol_cell.find("a")
+                symbol = symbol_link.get_text(strip=True) if symbol_link else symbol_cell.get_text(strip=True)
 
-                # Number of owners
-                num_owners = cols[1].get_text(strip=True) if len(cols) > 1 else "0"
-
-                # Total value
-                total_value = cols[2].get_text(strip=True).replace("$", "").replace(",", "") if len(cols) > 2 else "0"
+                # Stock name
+                stock_name = cols[1].get_text(strip=True) if len(cols) > 1 else symbol
 
                 # Percent of total
-                percent_total = cols[3].get_text(strip=True).replace("%", "") if len(cols) > 3 else "0"
+                percent_total = cols[2].get_text(strip=True).replace("%", "") if len(cols) > 2 else "0"
 
-                # List of owners (if available in additional column or tooltip)
-                owners_cell = cols[4] if len(cols) > 4 else None
-                owners = owners_cell.get_text(strip=True) if owners_cell else ""
+                # Number of owners
+                num_owners = cols[3].get_text(strip=True) if len(cols) > 3 else "0"
+
+                # Hold Price (as total_value for backward compatibility)
+                hold_price = cols[4].get_text(strip=True).replace("$", "").replace(",", "") if len(cols) > 4 else "0"
+
+                # Current Price
+                current_price = cols[6].get_text(strip=True).replace("$", "").replace(",", "") if len(cols) > 6 else "0"
 
                 stocks.append({
                     "stock": stock_name,
                     "symbol": symbol,
                     "num_owners": self._parse_int(num_owners),
-                    "total_value": self._parse_float(total_value),
+                    "total_value": self._parse_float(percent_total),
                     "percent_total": self._parse_float(percent_total),
-                    "owners": owners,
+                    "owners": num_owners,
+                    "hold_price": hold_price,
+                    "current_price": current_price,
                 })
 
         return pd.DataFrame(stocks)

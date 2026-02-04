@@ -424,12 +424,25 @@ elif page == "🌐 Grand Portfolio":
             title="슈퍼투자자 보유 현황 (Top 30)",
             color="num_owners",
             color_continuous_scale="Viridis",
-            hover_data=["stock"],
+            hover_data=["stock", "percent_total"],
         )
+        fig.update_layout(xaxis_tickangle=-45, yaxis_title="보유 투자자 수")
         st.plotly_chart(fig, use_container_width=True)
 
         # Table
-        st.dataframe(grand.head(50), use_container_width=True)
+        display_cols = ["symbol", "stock", "num_owners", "percent_total"]
+        col_names = ["종목코드", "종목명", "보유 투자자 수", "비중(%)"]
+
+        if "current_price" in grand.columns:
+            display_cols.append("current_price")
+            col_names.append("현재가($)")
+        if "hold_price" in grand.columns:
+            display_cols.append("hold_price")
+            col_names.append("매입가($)")
+
+        display_df = grand.head(50)[display_cols].copy()
+        display_df.columns = col_names
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
 
 
 # Korean Stocks page
