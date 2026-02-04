@@ -1,6 +1,7 @@
-"""연금저축 투자상품 추천 분석기 (개선된 알고리즘)."""
+"""연금저축 투자상품 추천 분석기 (검증된 금융 지표 기반)."""
 
 import pandas as pd
+import numpy as np
 import math
 from typing import Optional
 from dataclasses import dataclass
@@ -174,43 +175,96 @@ class PensionRecommender:
             'risk_level': risk_level,
         }
 
-    def _calculate_volatility(self, symbol: str) -> float:
-        """ETF 변동성 계산 (20일 표준편차 기반)."""
+    def _get_etf_ohlcv(self, symbol: str, days: int = 60) -> pd.DataFrame:
+        """ETF OHLCV 데이터 조회."""
         if not PYKRX_AVAILABLE:
-            return 0
+            return pd.DataFrame()
 
         try:
             trd_date = get_recent_trading_date()
             today_dt = datetime.strptime(trd_date, "%Y%m%d")
-            start_date = (today_dt - timedelta(days=35)).strftime("%Y%m%d")
+            start_date = (today_dt - timedelta(days=days)).strftime("%Y%m%d")
 
             ohlcv = krx.get_etf_ohlcv_by_date(start_date, trd_date, symbol)
-            if ohlcv.empty or len(ohlcv) < 10:
-                return 0
-
-            closes = ohlcv['종가']
-            # 일별 수익률
-            returns = closes.pct_change().dropna()
-
-            if len(returns) < 5:
-                return 0
-
-            # 연환산 변동성 (일별 표준편차 * sqrt(252))
-            volatility = returns.std() * (252 ** 0.5) * 100
-            return round(volatility, 2)
+            return ohlcv
 
         except Exception:
+            return pd.DataFrame()
+
+    def _calculate_volatility(self, ohlcv: pd.DataFrame) -> float:
+        """ETF 변동성 계산 (20일 연환산)."""
+        if ohlcv.empty or len(ohlcv) < 10:
             return 0
 
-    def _risk_adjusted_score(self, return_val: float, volatility: float) -> float:
-        """변동성 조정 수익률 점수 (샤프 비율 유사)."""
-        if volatility <= 0:
-            return return_val
+        closes = ohlcv['종가']
+        returns = closes.pct_change().dropna()
 
-        # 변동성이 높으면 수익률을 할인
-        # 간단한 샤프 유사 비율: return / (1 + volatility/100)
-        adjusted = return_val / (1 + volatility / 100)
-        return round(adjusted, 2)
+        if len(returns) < 5:
+            return 0
+
+        volatility = returns.std() * (252 ** 0.5) * 100
+        return round(volatility, 2)
+
+    def _calculate_sharpe_ratio(self, ohlcv: pd.DataFrame, risk_free_rate: float = 3.5) -> float:
+        """샤프 비율 계산 (정식 공식).
+
+        Sharpe = (연환산 수익률 - 무위험수익률) / 연환산 변동성
+        무위험수익률: 한국 CD금리 ~3.5% 기준
+        """
+        if ohlcv.empty or len(ohlcv) < 10:
+            return 0
+
+        closes = ohlcv['종가']
+        returns = closes.pct_change().dropna()
+
+        if len(returns) < 5:
+            return 0
+
+        # 연환산 수익률
+        annual_return = returns.mean() * 252 * 100
+
+        # 연환산 변동성
+        annual_vol = returns.std() * (252 ** 0.5) * 100
+
+        if annual_vol <= 0:
+            return 0
+
+        sharpe = (annual_return - risk_free_rate) / annual_vol
+        return round(sharpe, 2)
+
+    def _calculate_mdd(self, ohlcv: pd.DataFrame) -> float:
+        """최대 낙폭 (MDD) 계산 - 최고점 대비 최대 하락률."""
+        if ohlcv.empty or len(ohlcv) < 5:
+            return 0
+
+        closes = ohlcv['종가']
+        cumulative_max = closes.cummax()
+        drawdown = (closes - cumulative_max) / cumulative_max * 100
+        mdd = drawdown.min()
+        return round(mdd, 2)
+
+    def _calculate_rsi(self, closes: pd.Series, period: int = 14) -> float:
+        """RSI 계산 (Wilder 방식)."""
+        if len(closes) < period + 1:
+            return 50.0
+
+        deltas = closes.diff().dropna()
+        gains = deltas.clip(lower=0)
+        losses = (-deltas).clip(lower=0)
+
+        avg_gain = gains.iloc[:period].mean()
+        avg_loss = losses.iloc[:period].mean()
+
+        for i in range(period, len(gains)):
+            avg_gain = (avg_gain * (period - 1) + gains.iloc[i]) / period
+            avg_loss = (avg_loss * (period - 1) + losses.iloc[i]) / period
+
+        if avg_loss == 0:
+            return 100.0
+
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
+        return round(rsi, 2)
 
     def get_theme_etfs(self, theme: str, top_n: int = 5) -> pd.DataFrame:
         """테마별 ETF 추천."""
@@ -266,7 +320,7 @@ class PensionRecommender:
         }
 
     def get_quick_picks(self, top_n: int = 5) -> pd.DataFrame:
-        """빠른 추천 - 변동성 조정 수익률 기반 (개선)."""
+        """빠른 추천 - 샤프 비율/MDD/RSI 기반 종합 점수."""
         etfs = self.etf_scraper.get_pension_etfs(20)
 
         if etfs.empty:
@@ -274,29 +328,84 @@ class PensionRecommender:
 
         etfs = etfs.copy()
 
-        # 변동성 계산 및 조정 수익률
         volatilities = []
+        sharpe_ratios = []
+        mdds = []
+        rsis = []
         adjusted_scores = []
 
         for _, row in etfs.iterrows():
-            vol = self._calculate_volatility(row['symbol'])
+            ohlcv = self._get_etf_ohlcv(row['symbol'], 60)
+
+            vol = self._calculate_volatility(ohlcv)
+            sharpe = self._calculate_sharpe_ratio(ohlcv)
+            mdd = self._calculate_mdd(ohlcv)
+            rsi = self._calculate_rsi(ohlcv['종가']) if not ohlcv.empty and len(ohlcv) >= 15 else 50
+
             volatilities.append(vol)
+            sharpe_ratios.append(sharpe)
+            mdds.append(mdd)
+            rsis.append(rsi)
 
-            # 변동성 조정 점수
-            raw_score = row['return_1m'] * 0.5 + row['return_3m'] * 0.3
-            adj_score = self._risk_adjusted_score(raw_score, vol)
+            # 종합 점수 계산
+            score = 0
 
-            # 1개월 > 3개월 양수면 추세 보너스
+            # 1. 샤프 비율 기반 점수 (최대 10점)
+            if sharpe > 1.0:
+                score += 10
+            elif sharpe > 0.5:
+                score += 5
+            elif sharpe > 0:
+                score += 2
+            elif sharpe < -0.5:
+                score -= 5
+
+            # 2. MDD 기반 리스크 점수 (최대 5점, 감점 최대 -10점)
+            if mdd > -5:
+                score += 5
+            elif mdd > -10:
+                score += 2
+            elif mdd > -15:
+                score += 0
+            elif mdd > -20:
+                score -= 5
+            else:
+                score -= 10
+
+            # 3. RSI 기반 타이밍 점수 (최대 10점)
+            if rsi < 30:
+                score += 10  # 과매도 = 매수 적기
+            elif 30 <= rsi < 50:
+                score += 5
+            elif 50 <= rsi <= 70:
+                score += 3
+            elif rsi > 70:
+                score -= 5  # 과매수 = 진입 주의
+
+            # 4. 수익률 기반 점수
+            raw_return_score = row['return_1m'] * 0.5 + row['return_3m'] * 0.3
+
+            # 변동성 조정 (샤프 비율 방식)
+            if vol > 0:
+                return_score = raw_return_score / (1 + vol / 100)
+            else:
+                return_score = raw_return_score
+
+            score += return_score
+
+            # 5. 추세 보너스/패널티
             if row['return_1m'] > 0 and row['return_3m'] > 0:
-                adj_score += 5  # 지속 상승 보너스
+                score += 3  # 지속 상승
 
-            # 1개월 급등(>15%)이면 과열 패널티
             if row['return_1m'] > 15:
-                adj_score -= 3
+                score -= 3  # 과열 주의
 
-            adjusted_scores.append(adj_score)
+            adjusted_scores.append(round(score, 2))
 
         etfs['volatility'] = volatilities
+        etfs['sharpe'] = sharpe_ratios
+        etfs['mdd'] = mdds
+        etfs['rsi'] = rsis
         etfs['score'] = adjusted_scores
 
         return etfs.sort_values('score', ascending=False).head(top_n)

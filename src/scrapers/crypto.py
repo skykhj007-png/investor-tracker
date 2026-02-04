@@ -325,6 +325,106 @@ class CryptoScraper:
         else:
             return self.binance.get_daily_candles(market, count)
 
+    def get_fear_greed_index(self) -> dict:
+        """암호화폐 공포/탐욕 지수 (alternative.me API)."""
+        cache_key = "fear_greed"
+        cached = self.upbit._cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        try:
+            resp = requests.get(
+                "https://api.alternative.me/fng/",
+                params={"limit": 1, "format": "json"},
+                timeout=10
+            )
+            data = resp.json()
+
+            if 'data' in data and len(data['data']) > 0:
+                item = data['data'][0]
+                result = {
+                    'value': int(item['value']),
+                    'classification': item['value_classification'],
+                    'timestamp': item['timestamp'],
+                }
+                self.upbit._cache.set(cache_key, result)
+                return result
+
+        except Exception as e:
+            print(f"공포탐욕지수 조회 오류: {e}")
+
+        return {'value': 50, 'classification': 'Neutral', 'timestamp': ''}
+
+    def get_kimchi_premium(self, symbols: list = None) -> dict:
+        """김치프리미엄 계산 (업비트 KRW vs 바이낸스 USDT).
+
+        Returns:
+            dict with 'exchange_rate' (KRW/USD) and 'premiums' (symbol -> premium %)
+        """
+        cache_key = "kimchi_premium"
+        cached = self.upbit._cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        try:
+            # 환율 조회 (업비트의 USDT 시세로 추정)
+            # 업비트에서 BTC 가격과 바이낸스 BTC 가격으로 역산
+            upbit_tickers = self.upbit.get_tickers()
+            binance_stats = self.binance.get_24hr_stats()
+
+            if upbit_tickers.empty or binance_stats.empty:
+                return {'exchange_rate': 0, 'premiums': {}, 'avg_premium': 0}
+
+            # 주요 코인으로 환율 추정 (BTC 기준)
+            upbit_btc = upbit_tickers[upbit_tickers['symbol'] == 'BTC']
+            binance_btc = binance_stats[binance_stats['base'] == 'BTC']
+
+            if upbit_btc.empty or binance_btc.empty:
+                return {'exchange_rate': 0, 'premiums': {}, 'avg_premium': 0}
+
+            upbit_btc_price = upbit_btc.iloc[0]['price']
+            binance_btc_price = binance_btc.iloc[0]['price']
+
+            if binance_btc_price <= 0:
+                return {'exchange_rate': 0, 'premiums': {}, 'avg_premium': 0}
+
+            # 실질 환율 = 업비트 BTC원화가 / 바이낸스 BTC달러가
+            exchange_rate = upbit_btc_price / binance_btc_price
+
+            # 주요 코인별 김치프리미엄 계산
+            if symbols is None:
+                symbols = ['BTC', 'ETH', 'XRP', 'SOL', 'DOGE']
+
+            premiums = {}
+            premium_values = []
+
+            for sym in symbols:
+                upbit_row = upbit_tickers[upbit_tickers['symbol'] == sym]
+                binance_row = binance_stats[binance_stats['base'] == sym]
+
+                if not upbit_row.empty and not binance_row.empty:
+                    upbit_price = upbit_row.iloc[0]['price']
+                    binance_price_krw = binance_row.iloc[0]['price'] * exchange_rate
+
+                    if binance_price_krw > 0:
+                        premium = ((upbit_price - binance_price_krw) / binance_price_krw) * 100
+                        premiums[sym] = round(premium, 2)
+                        premium_values.append(premium)
+
+            avg_premium = round(sum(premium_values) / len(premium_values), 2) if premium_values else 0
+
+            result = {
+                'exchange_rate': round(exchange_rate, 2),
+                'premiums': premiums,
+                'avg_premium': avg_premium,
+            }
+            self.upbit._cache.set(cache_key, result)
+            return result
+
+        except Exception as e:
+            print(f"김치프리미엄 계산 오류: {e}")
+            return {'exchange_rate': 0, 'premiums': {}, 'avg_premium': 0}
+
 
 # CLI 테스트
 if __name__ == "__main__":

@@ -607,11 +607,16 @@ elif page == "🎯 종목 추천":
     recommender = get_recommender()
 
     st.info("""
-    **점수 산정 기준:**
-    - 외국인 순매수 상위 30위: +30점 (순위별 가중)
-    - 기관 순매수 상위 30위: +30점 (순위별 가중)
-    - 외국인+기관 동반 매수: +20점 (시너지 보너스)
-    - 공매도 비중 5% 이하: +10점 / 20% 이상: -10점
+    **점수 산정 기준 (최대 ~120점):**
+    - 외국인 순매수: 최대 30점 (순위+금액)
+    - 기관 순매수: 최대 30점 (순위+금액)
+    - 동반 매수 시너지: +10점
+    - 가격 모멘텀 (MA5/MA20): 최대 15점
+    - 거래량 급증: 최대 10점
+    - 시가총액/공매도: ±5점
+    - **PER/PBR 밸류에이션**: 최대 15점
+    - **RSI (14일)**: 최대 10점
+    - **MACD 크로스**: 최대 10점
     """)
 
     tab1, tab2, tab3 = st.tabs(["🏆 종합 추천", "⭐ 동반 매수", "🔥 역발상 매수"])
@@ -638,8 +643,22 @@ elif page == "🎯 종목 추천":
 
             # Detailed table
             st.subheader("상세 정보")
-            display_df = recs[['rank', 'symbol', 'name', 'score', 'signals', 'foreign_억', 'inst_억', 'short_ratio']]
-            display_df.columns = ['순위', '코드', '종목명', '점수', '시그널', '외국인(억)', '기관(억)', '공매도(%)']
+            available_cols = ['rank', 'symbol', 'name', 'score', 'signals', 'foreign_억', 'inst_억', 'short_ratio']
+            col_names = ['순위', '코드', '종목명', '점수', '시그널', '외국인(억)', '기관(억)', '공매도(%)']
+
+            # 새 지표 컬럼이 있으면 추가
+            if 'per' in recs.columns:
+                available_cols.append('per')
+                col_names.append('PER')
+            if 'pbr' in recs.columns:
+                available_cols.append('pbr')
+                col_names.append('PBR')
+            if 'rsi' in recs.columns:
+                available_cols.append('rsi')
+                col_names.append('RSI')
+
+            display_df = recs[available_cols].copy()
+            display_df.columns = col_names
             st.dataframe(display_df, use_container_width=True, hide_index=True)
         else:
             st.warning("추천 데이터를 가져올 수 없습니다.")
@@ -794,8 +813,21 @@ elif page == "💰 연금저축":
             st.plotly_chart(fig, use_container_width=True)
 
             # 테이블
-            display_df = quick_picks[['rank', 'symbol', 'name', 'price', 'return_1m', 'return_3m', 'asset_class']].copy()
-            display_df.columns = ['순위', '코드', 'ETF명', '현재가', '1개월(%)', '3개월(%)', '자산군']
+            etf_cols = ['rank', 'symbol', 'name', 'price', 'return_1m', 'return_3m', 'asset_class']
+            etf_names = ['순위', '코드', 'ETF명', '현재가', '1개월(%)', '3개월(%)', '자산군']
+
+            if 'sharpe' in quick_picks.columns:
+                etf_cols.append('sharpe')
+                etf_names.append('샤프비율')
+            if 'mdd' in quick_picks.columns:
+                etf_cols.append('mdd')
+                etf_names.append('MDD(%)')
+            if 'rsi' in quick_picks.columns:
+                etf_cols.append('rsi')
+                etf_names.append('RSI')
+
+            display_df = quick_picks[etf_cols].copy()
+            display_df.columns = etf_names
             st.dataframe(display_df, use_container_width=True, hide_index=True)
         else:
             st.warning("ETF 데이터를 가져올 수 없습니다.")
@@ -1019,6 +1051,29 @@ elif page == "🪙 현물코인":
     with tab1:
         st.subheader("거래대금 상위 코인")
 
+        # 공포탐욕지수 + 김치프리미엄 표시
+        fg_col1, fg_col2, fg_col3 = st.columns(3)
+        try:
+            fg = crypto_scraper.get_fear_greed_index()
+            fg_val = fg['value']
+            fg_label = fg['classification']
+            fg_color = "🟢" if fg_val < 25 else "🟡" if fg_val < 45 else "🟠" if fg_val < 55 else "🔴" if fg_val < 75 else "🔴"
+            fg_col1.metric("공포/탐욕 지수", f"{fg_color} {fg_val} ({fg_label})")
+        except Exception:
+            fg_col1.metric("공포/탐욕 지수", "N/A")
+
+        try:
+            kp = crypto_scraper.get_kimchi_premium()
+            avg_kp = kp.get('avg_premium', 0)
+            kp_color = "🔴" if avg_kp > 5 else "🟡" if avg_kp > 2 else "🟢" if avg_kp > -1 else "🔵"
+            fg_col2.metric("김치프리미엄(평균)", f"{kp_color} {avg_kp:+.2f}%")
+            fg_col3.metric("추정 환율", f"₩{kp.get('exchange_rate', 0):,.0f}/USD")
+        except Exception:
+            fg_col2.metric("김치프리미엄", "N/A")
+            fg_col3.metric("추정 환율", "N/A")
+
+        st.markdown("---")
+
         col1, col2 = st.columns([1, 3])
         with col1:
             exchange = st.radio("거래소", ["업비트 (KRW)", "바이낸스 (USDT)"], key="t1_exchange")
@@ -1184,7 +1239,7 @@ elif page == "🪙 현물코인":
 
             if 'error' not in analysis:
                 # 지표 표시
-                col1, col2, col3, col4 = st.columns(4)
+                col1, col2, col3, col4, col5 = st.columns(5)
                 price_str = f"{analysis['price']:,.0f}원" if ex_key4 == "upbit" else f"${analysis['price']:,.4f}"
                 col1.metric("현재가", price_str)
                 col2.metric("MA5", f"{analysis['ma5']:,.0f}" if ex_key4 == "upbit" else f"${analysis['ma5']:,.4f}")
@@ -1194,11 +1249,15 @@ elif page == "🪙 현물코인":
                 rsi_label = "과매수" if rsi_val > 70 else "과매도" if rsi_val < 30 else "중립"
                 col4.metric(f"RSI ({rsi_label})", f"{rsi_val:.1f}")
 
+                macd_cross = analysis.get('macd_cross', 'none')
+                macd_label = {'golden': '골든크로스', 'dead': '데드크로스', 'bullish': '강세', 'bearish': '약세'}.get(macd_cross, '-')
+                col5.metric("MACD", macd_label)
+
                 # 신호
                 if analysis['signals']:
                     st.info("**분석 신호**: " + ", ".join(analysis['signals']))
 
-                # 캔들차트 + MA
+                # 캔들차트 + MA + 볼린저밴드
                 candles = analysis.get('candles', pd.DataFrame())
                 if not candles.empty:
                     fig = go.Figure()
@@ -1221,12 +1280,44 @@ elif page == "🪙 현물코인":
                             name='MA20', line=dict(color='blue', width=1.5)
                         ))
 
+                    # 볼린저밴드
+                    if 'bb_upper' in candles.columns:
+                        fig.add_trace(go.Scatter(
+                            x=candles['date'], y=candles['bb_upper'],
+                            name='BB Upper', line=dict(color='rgba(255,0,0,0.3)', width=1, dash='dot')
+                        ))
+                        fig.add_trace(go.Scatter(
+                            x=candles['date'], y=candles['bb_lower'],
+                            name='BB Lower', line=dict(color='rgba(0,128,0,0.3)', width=1, dash='dot'),
+                            fill='tonexty', fillcolor='rgba(173,216,230,0.1)'
+                        ))
+
                     fig.update_layout(
-                        title=f"{analysis['name']} 일봉 차트",
+                        title=f"{analysis['name']} 일봉 차트 (MA + 볼린저밴드)",
                         xaxis_rangeslider_visible=False,
                         height=500,
                     )
                     st.plotly_chart(fig, use_container_width=True)
+
+                    # MACD 차트
+                    if 'macd' in candles.columns:
+                        fig_macd = go.Figure()
+                        fig_macd.add_trace(go.Scatter(
+                            x=candles['date'], y=candles['macd'],
+                            name='MACD', line=dict(color='blue', width=1.5)
+                        ))
+                        fig_macd.add_trace(go.Scatter(
+                            x=candles['date'], y=candles['macd_signal'],
+                            name='Signal', line=dict(color='red', width=1.5)
+                        ))
+                        if 'macd_hist' in candles.columns:
+                            colors = ['green' if v >= 0 else 'red' for v in candles['macd_hist']]
+                            fig_macd.add_trace(go.Bar(
+                                x=candles['date'], y=candles['macd_hist'],
+                                name='Histogram', marker_color=colors, opacity=0.5
+                            ))
+                        fig_macd.update_layout(title='MACD (12, 26, 9)', height=300)
+                        st.plotly_chart(fig_macd, use_container_width=True)
 
                     # RSI 차트
                     rsi_values = []
@@ -1254,12 +1345,16 @@ elif page == "🪙 현물코인":
         ex_key5 = "upbit" if "업비트" in exchange5 else "binance"
 
         st.info("""
-        **점수 산정 기준 (최대 ~100점):**
-        - 모멘텀 (24h/5일 변화율): 최대 25점
-        - 거래량 급증: 최대 20점
-        - 기술적 분석 (MA/RSI): 최대 25점
-        - 거래대금 순위: 최대 15점
-        - 추세 지속성 (연속양봉): 최대 15점
+        **점수 산정 기준 (최대 ~130점):**
+        - 모멘텀 (24h/5일 변화율): 최대 20점
+        - 거래량 급증: 최대 15점
+        - 기술적 분석 (MA/RSI): 최대 20점
+        - 거래대금 순위: 최대 10점
+        - 추세 지속성 (연속양봉): 최대 10점
+        - **MACD (골든/데드크로스)**: 최대 15점
+        - **볼린저밴드 (과매수/과매도)**: 최대 15점
+        - **공포탐욕지수**: 최대 15점
+        - **김치프리미엄 (업비트만)**: 최대 10점
         """)
 
         with st.spinner("종합 분석 중... (최대 2분 소요)"):
@@ -1283,21 +1378,31 @@ elif page == "🪙 현물코인":
             st.subheader("📋 추천 상세")
             for _, row in recommendations.head(10).iterrows():
                 with st.expander(f"{row['rank']}. {row['name']} ({row['symbol']}) - 점수: {row['score']}"):
-                    col1, col2, col3, col4 = st.columns(4)
+                    col1, col2, col3, col4, col5 = st.columns(5)
                     price_str = f"{row['price']:,.0f}원" if ex_key5 == "upbit" else f"${row['price']:,.4f}"
                     col1.metric("현재가", price_str)
                     col2.metric("24h 변동", f"{row['change_24h']:+.2f}%")
                     col3.metric("RSI", f"{row['rsi']:.0f}")
-                    col4.metric("총점", f"{row['score']:.1f}")
+                    macd_kr = {'golden': '골든크로스', 'dead': '데드크로스', 'bullish': '강세', 'bearish': '약세'}.get(row.get('macd_cross', ''), '-')
+                    col4.metric("MACD", macd_kr)
+                    col5.metric("총점", f"{row['score']:.1f}")
 
-                    st.markdown(f"**모멘텀**: {row['momentum_score']}점 | **거래량**: {row['volume_score']}점 | **기술적**: {row['technical_score']}점")
+                    macd_s = row.get('macd_score', 0)
+                    bb_s = row.get('bb_score', 0)
+                    st.markdown(f"**모멘텀**: {row['momentum_score']}점 | **거래량**: {row['volume_score']}점 | **기술적**: {row['technical_score']}점 | **MACD**: {macd_s}점 | **볼린저**: {bb_s}점")
                     st.markdown(f"**신호**: {row['signals']}")
 
             # 전체 테이블
             st.subheader("📊 전체 추천 목록")
-            display_df = recommendations[['rank', 'symbol', 'name', 'price', 'change_24h',
-                                         'score', 'rsi', 'vol_change_pct', 'signals']].copy()
-            display_df.columns = ['순위', '심볼', '코인명', '현재가', '24h(%)', '점수', 'RSI', '거래량변화(%)', '신호']
+            rec_cols = ['rank', 'symbol', 'name', 'price', 'change_24h', 'score', 'rsi', 'vol_change_pct', 'signals']
+            rec_names = ['순위', '심볼', '코인명', '현재가', '24h(%)', '점수', 'RSI', '거래량변화(%)', '신호']
+
+            if 'macd_cross' in recommendations.columns:
+                rec_cols.insert(7, 'macd_cross')
+                rec_names.insert(7, 'MACD')
+
+            display_df = recommendations[rec_cols].copy()
+            display_df.columns = rec_names
             st.dataframe(display_df, use_container_width=True, hide_index=True)
         else:
             st.warning("추천 데이터를 가져올 수 없습니다.")

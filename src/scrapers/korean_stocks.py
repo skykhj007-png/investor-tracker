@@ -318,6 +318,51 @@ class KrxDataScraper:
             print(f"공매도 잔고 오류: {e}")
             return pd.DataFrame()
 
+    def get_fundamentals(self, market: str = "KOSPI") -> pd.DataFrame:
+        """PER/PBR/배당수익률 등 펀더멘탈 지표 조회."""
+        if not PYKRX_AVAILABLE:
+            return pd.DataFrame()
+
+        try:
+            trd_date = get_recent_trading_date()
+            df = krx.get_market_fundamental_by_ticker(trd_date, market=market)
+
+            if df.empty:
+                return pd.DataFrame()
+
+            df = df.reset_index()
+            df = df.rename(columns={
+                '티커': 'symbol',
+                'PER': 'per',
+                'PBR': 'pbr',
+                'EPS': 'eps',
+                'BPS': 'bps',
+                'DIV': 'div_yield',
+            })
+
+            return df
+
+        except Exception as e:
+            print(f"펀더멘탈 데이터 오류: {e}")
+            return pd.DataFrame()
+
+    def get_ohlcv(self, symbol: str, days: int = 40) -> pd.DataFrame:
+        """개별 종목 OHLCV 조회 (RSI/MACD 계산용)."""
+        if not PYKRX_AVAILABLE:
+            return pd.DataFrame()
+
+        try:
+            trd_date = get_recent_trading_date()
+            today_dt = datetime.strptime(trd_date, "%Y%m%d")
+            start_date = (today_dt - timedelta(days=days)).strftime("%Y%m%d")
+
+            df = krx.get_market_ohlcv_by_date(start_date, trd_date, symbol)
+            return df
+
+        except Exception as e:
+            print(f"OHLCV 조회 오류: {e}")
+            return pd.DataFrame()
+
     def get_accumulation_signals(self, market: str = "KOSPI", top_n: int = 20) -> pd.DataFrame:
         """주식 매집 신호 분석 - 거래량 급증 + 외국인/기관 순매수 종목.
 
@@ -617,6 +662,14 @@ class KoreanStocksScraper:
     def get_credit_balance(self, top_n: int = 30) -> pd.DataFrame:
         """신용잔고 상위."""
         return self.credit.get_credit_balance_top(top_n)
+
+    def get_fundamentals(self, market: str = "KOSPI") -> pd.DataFrame:
+        """PER/PBR/배당수익률 펀더멘탈 지표."""
+        return self.krx.get_fundamentals(market)
+
+    def get_ohlcv(self, symbol: str, days: int = 40) -> pd.DataFrame:
+        """개별 종목 OHLCV 조회."""
+        return self.krx.get_ohlcv(symbol, days)
 
     def get_accumulation_signals(self, market: str = "KOSPI", top_n: int = 20) -> pd.DataFrame:
         """주식 매집 신호 분석."""

@@ -1,6 +1,7 @@
 """Korean stock recommendation analyzer based on multiple signals."""
 
 import pandas as pd
+import numpy as np
 from typing import Optional
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -40,19 +41,170 @@ class StockSignal:
     short_ratio: float = 0
     score: float = 0
     signals: list = field(default_factory=list)
-    # 새로운 필드
     momentum_score: float = 0
     volume_score: float = 0
     amount_score: float = 0
     consecutive_days: int = 0
     market_cap: float = 0
+    per: float = 0
+    pbr: float = 0
+    rsi: float = 50
 
 
 class KoreanStockRecommender:
-    """종목 추천 분석기 - 외국인/기관/공매도/모멘텀/거래량 종합 분석."""
+    """종목 추천 분석기 - 외국인/기관/공매도/모멘텀/거래량/펀더멘탈/기술적 종합 분석."""
 
     def __init__(self):
         self.scraper = KoreanStocksScraper()
+
+    def _calculate_rsi(self, closes: pd.Series, period: int = 14) -> float:
+        """RSI 계산 (Wilder 방식)."""
+        if len(closes) < period + 1:
+            return 50.0
+
+        deltas = closes.diff().dropna()
+        gains = deltas.clip(lower=0)
+        losses = (-deltas).clip(lower=0)
+
+        avg_gain = gains.iloc[:period].mean()
+        avg_loss = losses.iloc[:period].mean()
+
+        for i in range(period, len(gains)):
+            avg_gain = (avg_gain * (period - 1) + gains.iloc[i]) / period
+            avg_loss = (avg_loss * (period - 1) + losses.iloc[i]) / period
+
+        if avg_loss == 0:
+            return 100.0
+
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
+        return round(rsi, 2)
+
+    def _calculate_macd(self, closes: pd.Series) -> dict:
+        """MACD 계산 (12-EMA, 26-EMA, 9-Signal)."""
+        if len(closes) < 26:
+            return {'macd': 0, 'signal': 0, 'histogram': 0, 'cross': 'none'}
+
+        ema12 = closes.ewm(span=12, adjust=False).mean()
+        ema26 = closes.ewm(span=26, adjust=False).mean()
+        macd_line = ema12 - ema26
+        signal_line = macd_line.ewm(span=9, adjust=False).mean()
+        histogram = macd_line - signal_line
+
+        current_macd = macd_line.iloc[-1]
+        current_signal = signal_line.iloc[-1]
+        prev_macd = macd_line.iloc[-2]
+        prev_signal = signal_line.iloc[-2]
+
+        # 크로스 판별
+        if prev_macd <= prev_signal and current_macd > current_signal:
+            cross = 'golden'  # 골든크로스
+        elif prev_macd >= prev_signal and current_macd < current_signal:
+            cross = 'dead'  # 데드크로스
+        elif current_macd > current_signal:
+            cross = 'bullish'
+        else:
+            cross = 'bearish'
+
+        return {
+            'macd': round(current_macd, 2),
+            'signal': round(current_signal, 2),
+            'histogram': round(histogram.iloc[-1], 2),
+            'cross': cross,
+        }
+
+    def _get_fundamental_score(self, symbol: str, fundamentals_df: pd.DataFrame) -> dict:
+        """PER/PBR 기반 밸류에이션 점수."""
+        if fundamentals_df.empty or symbol not in fundamentals_df['symbol'].values:
+            return {'fundamental_score': 0, 'per': 0, 'pbr': 0, 'signals': []}
+
+        row = fundamentals_df[fundamentals_df['symbol'] == symbol].iloc[0]
+        per = row.get('per', 0) or 0
+        pbr = row.get('pbr', 0) or 0
+
+        score = 0
+        signals = []
+
+        # PER 분석
+        if 0 < per <= 10:
+            score += 8
+            signals.append(f"💎저PER({per:.1f})")
+        elif 0 < per <= 15:
+            score += 5
+        elif per > 50:
+            score -= 3
+            signals.append(f"⚠️고PER({per:.0f})")
+
+        # PBR 분석
+        if 0 < pbr <= 1.0:
+            score += 7
+            signals.append(f"💎저PBR({pbr:.2f})")
+        elif 0 < pbr <= 1.5:
+            score += 3
+        elif pbr > 5.0:
+            score -= 2
+            signals.append(f"⚠️고PBR({pbr:.1f})")
+
+        return {
+            'fundamental_score': score,
+            'per': per,
+            'pbr': pbr,
+            'signals': signals,
+        }
+
+    def _get_technical_score(self, symbol: str) -> dict:
+        """RSI + MACD 기술적 점수."""
+        if not PYKRX_AVAILABLE:
+            return {'rsi': 50, 'rsi_score': 0, 'macd_score': 0, 'macd_cross': 'none', 'signals': []}
+
+        try:
+            ohlcv = self.scraper.get_ohlcv(symbol, 60)
+            if ohlcv.empty or len(ohlcv) < 15:
+                return {'rsi': 50, 'rsi_score': 0, 'macd_score': 0, 'macd_cross': 'none', 'signals': []}
+
+            closes = ohlcv['종가']
+            rsi = self._calculate_rsi(closes)
+            macd_data = self._calculate_macd(closes)
+
+            score_rsi = 0
+            score_macd = 0
+            signals = []
+
+            # RSI 점수 (최대 10점)
+            if rsi < 30:
+                score_rsi = 10
+                signals.append(f"💎과매도(RSI:{rsi:.0f})")
+            elif 50 <= rsi <= 70:
+                score_rsi = 5
+                signals.append(f"📈RSI강세({rsi:.0f})")
+            elif rsi > 70:
+                score_rsi = -5
+                signals.append(f"⚠️과매수(RSI:{rsi:.0f})")
+            elif 30 <= rsi < 50:
+                score_rsi = 3
+
+            # MACD 점수 (최대 10점)
+            if macd_data['cross'] == 'golden':
+                score_macd = 10
+                signals.append("📈MACD골든크로스")
+            elif macd_data['cross'] == 'bullish':
+                score_macd = 5
+            elif macd_data['cross'] == 'dead':
+                score_macd = -5
+                signals.append("📉MACD데드크로스")
+            elif macd_data['cross'] == 'bearish':
+                score_macd = -2
+
+            return {
+                'rsi': rsi,
+                'rsi_score': score_rsi,
+                'macd_score': score_macd,
+                'macd_cross': macd_data['cross'],
+                'signals': signals,
+            }
+
+        except Exception:
+            return {'rsi': 50, 'rsi_score': 0, 'macd_score': 0, 'macd_cross': 'none', 'signals': []}
 
     def _get_price_momentum(self, symbol: str) -> dict:
         """가격 모멘텀 분석 (5일/20일 이동평균 기반)."""
@@ -235,19 +387,19 @@ class KoreanStockRecommender:
 
     def get_recommendations(self, market: str = "KOSPI", top_n: int = 20) -> pd.DataFrame:
         """
-        종합 추천 종목 리스트 생성 (개선된 알고리즘).
+        종합 추천 종목 리스트 생성 (검증된 금융 지표 기반).
 
-        점수 산정 기준 (총 100점 만점):
-        - 외국인 순매수: 순위 점수(0~20) + 금액 점수(0~20) = 최대 40점
-        - 기관 순매수: 순위 점수(0~20) + 금액 점수(0~20) = 최대 40점
-        - 동반 매수 시너지: +15점
-        - 가격 모멘텀: -5 ~ +25점
-        - 거래량 급증: 0 ~ +15점
-        - 시가총액: -5 ~ +10점
-        - 공매도 비중: -10 ~ +10점
-
-        Returns:
-            DataFrame with recommended stocks and scores
+        점수 산정 기준 (총 ~120점 만점):
+        - 외국인 순매수: 순위(0~15) + 금액(0~15) = 최대 30점
+        - 기관 순매수: 순위(0~15) + 금액(0~15) = 최대 30점
+        - 동반 매수 시너지: +10점
+        - 가격 모멘텀 (MA): -5 ~ +15점
+        - 거래량 급증: 0 ~ +10점
+        - 시가총액: -5 ~ +5점
+        - 공매도 비중: -5 ~ +5점
+        - PER/PBR 밸류에이션 (신규): -5 ~ +15점
+        - RSI (신규): -5 ~ +10점
+        - MACD (신규): -5 ~ +10점
         """
         # 데이터 수집
         foreign_df = self.scraper.get_foreign_buying(50)
@@ -257,6 +409,9 @@ class KoreanStockRecommender:
         if foreign_df.empty and inst_df.empty:
             return pd.DataFrame()
 
+        # 펀더멘탈 데이터 일괄 조회
+        fundamentals_df = self.scraper.get_fundamentals(market)
+
         # 최대 매수금액 (금액 점수 정규화용)
         max_foreign_amount = foreign_df['net_amount'].max() if not foreign_df.empty else 1
         max_inst_amount = inst_df['net_amount'].max() if not inst_df.empty else 1
@@ -264,27 +419,17 @@ class KoreanStockRecommender:
         # 종목별 데이터 통합
         stocks = {}
 
-        # 외국인 순매수 데이터
         for _, row in foreign_df.iterrows():
             symbol = row['symbol']
             if symbol not in stocks:
-                stocks[symbol] = StockSignal(
-                    symbol=symbol,
-                    name=row['name'],
-                    signals=[]
-                )
+                stocks[symbol] = StockSignal(symbol=symbol, name=row['name'], signals=[])
             stocks[symbol].foreign_rank = int(row['rank'])
             stocks[symbol].foreign_amount = row['net_amount']
 
-        # 기관 순매수 데이터
         for _, row in inst_df.iterrows():
             symbol = row['symbol']
             if symbol not in stocks:
-                stocks[symbol] = StockSignal(
-                    symbol=symbol,
-                    name=row['name'],
-                    signals=[]
-                )
+                stocks[symbol] = StockSignal(symbol=symbol, name=row['name'], signals=[])
             stocks[symbol].inst_rank = int(row['rank'])
             stocks[symbol].inst_amount = row['net_amount']
 
@@ -294,8 +439,7 @@ class KoreanStockRecommender:
             for _, row in short_df.iterrows():
                 short_dict[row['symbol']] = row['short_ratio']
 
-        # 모멘텀/거래량/시총 분석 (상위 종목만 - 속도 최적화)
-        # 순위 30위 이내 또는 동반매수 종목만 상세 분석
+        # 상세 분석 대상 (순위 30위 이내 또는 동반매수)
         priority_symbols = set()
         for symbol, stock in stocks.items():
             fr = stock.foreign_rank or 999
@@ -303,27 +447,32 @@ class KoreanStockRecommender:
             if fr <= 30 or ir <= 30 or (stock.foreign_rank and stock.inst_rank):
                 priority_symbols.add(symbol)
 
+        # 모멘텀/거래량/기술적 분석 캐시
         momentum_cache = {}
         volume_cache = {}
         cap_cache = {}
+        technical_cache = {}
+        fundamental_cache = {}
 
         for symbol in priority_symbols:
             momentum_cache[symbol] = self._get_price_momentum(symbol)
             volume_cache[symbol] = self._get_volume_surge(symbol)
+            technical_cache[symbol] = self._get_technical_score(symbol)
+            fundamental_cache[symbol] = self._get_fundamental_score(symbol, fundamentals_df)
 
-        # 시총은 한번에 조회
+        # 시총 일괄 조회
         if PYKRX_AVAILABLE:
             try:
                 trd_date = get_recent_trading_date()
-                cap_df = krx.get_market_cap_by_ticker(trd_date, market="KOSPI")
+                cap_df = krx.get_market_cap_by_ticker(trd_date, market=market)
                 for symbol in priority_symbols:
                     if symbol in cap_df.index:
                         mc = cap_df.loc[symbol, '시가총액']
                         cap_조 = mc / 1e12
                         if cap_조 >= 10:
-                            cap_cache[symbol] = {'market_cap': mc, 'cap_score': 10, 'cap_label': '대형주'}
+                            cap_cache[symbol] = {'market_cap': mc, 'cap_score': 5, 'cap_label': '대형주'}
                         elif cap_조 >= 1:
-                            cap_cache[symbol] = {'market_cap': mc, 'cap_score': 5, 'cap_label': '중형주'}
+                            cap_cache[symbol] = {'market_cap': mc, 'cap_score': 3, 'cap_label': '중형주'}
                         elif cap_조 >= 0.3:
                             cap_cache[symbol] = {'market_cap': mc, 'cap_score': 0, 'cap_label': '소형주'}
                         else:
@@ -336,15 +485,11 @@ class KoreanStockRecommender:
             score = 0
             signals = []
 
-            # === 1. 외국인 순매수 (최대 40점) ===
+            # === 1. 외국인 순매수 (최대 30점) ===
             if stock.foreign_rank:
-                # 순위 점수 (1위=20점, 30위=1점)
-                rank_score = max(0, 21 - stock.foreign_rank) if stock.foreign_rank <= 20 else 0
-                score += rank_score
-
-                # 금액 점수 (매수 규모 반영, 최대 20점)
-                amount_score = self._calculate_amount_score(stock.foreign_amount, max_foreign_amount)
-                score += amount_score
+                rank_score = max(0, 16 - stock.foreign_rank) if stock.foreign_rank <= 15 else 0
+                amount_score = min(15, self._calculate_amount_score(stock.foreign_amount, max_foreign_amount) * 0.75)
+                score += rank_score + amount_score
 
                 if stock.foreign_rank <= 5:
                     signals.append(f"🌍외국인 TOP{stock.foreign_rank}")
@@ -357,13 +502,11 @@ class KoreanStockRecommender:
                 if amount_억 >= 100:
                     signals.append(f"💰외국인{amount_억}억")
 
-            # === 2. 기관 순매수 (최대 40점) ===
+            # === 2. 기관 순매수 (최대 30점) ===
             if stock.inst_rank:
-                rank_score = max(0, 21 - stock.inst_rank) if stock.inst_rank <= 20 else 0
-                score += rank_score
-
-                amount_score = self._calculate_amount_score(stock.inst_amount, max_inst_amount)
-                score += amount_score
+                rank_score = max(0, 16 - stock.inst_rank) if stock.inst_rank <= 15 else 0
+                amount_score = min(15, self._calculate_amount_score(stock.inst_amount, max_inst_amount) * 0.75)
+                score += rank_score + amount_score
 
                 if stock.inst_rank <= 5:
                     signals.append(f"🏛️기관 TOP{stock.inst_rank}")
@@ -376,16 +519,17 @@ class KoreanStockRecommender:
                 if amount_억 >= 100:
                     signals.append(f"💰기관{amount_억}억")
 
-            # === 3. 동반 매수 시너지 (+15점) ===
+            # === 3. 동반 매수 시너지 (+10점) ===
             if stock.foreign_rank and stock.inst_rank:
                 if stock.foreign_rank <= 30 and stock.inst_rank <= 30:
-                    score += 15
+                    score += 10
                     signals.append("⭐동반매수")
 
-            # === 4. 가격 모멘텀 (-5 ~ +25점) ===
+            # === 4. 가격 모멘텀 (-5 ~ +15점) ===
             if symbol in momentum_cache:
                 m = momentum_cache[symbol]
-                score += m['momentum_score']
+                mom_score = min(15, m['momentum_score'])
+                score += mom_score
                 if m['trend'] == 'strong_up':
                     signals.append(f"📈강한상승({m['price_change_5d']:+.1f}%)")
                 elif m['trend'] == 'up':
@@ -393,38 +537,51 @@ class KoreanStockRecommender:
                 elif m['trend'] == 'down':
                     signals.append("📉하락추세")
 
-            # === 5. 거래량 급증 (0 ~ +15점) ===
+            # === 5. 거래량 급증 (0 ~ +10점) ===
             if symbol in volume_cache:
                 v = volume_cache[symbol]
-                score += v['volume_score']
+                vol_score = min(10, v['volume_score'])
+                score += vol_score
                 if v['vol_change_pct'] > 100:
                     signals.append(f"🔥거래량폭증({v['vol_change_pct']:+.0f}%)")
                 elif v['vol_change_pct'] > 50:
                     signals.append(f"📊거래량급증({v['vol_change_pct']:+.0f}%)")
 
-            # === 6. 시가총액 필터 (-5 ~ +10점) ===
+            # === 6. 시가총액 (-5 ~ +5점) ===
             if symbol in cap_cache:
                 c = cap_cache[symbol]
                 score += c['cap_score']
                 stock.market_cap = c['market_cap']
 
-            # === 7. 공매도 비중 (-10 ~ +10점) ===
+            # === 7. 공매도 비중 (-5 ~ +5점) ===
             short_ratio = short_dict.get(symbol, 0)
             stock.short_ratio = short_ratio
-
             if short_ratio > 0:
                 if short_ratio <= 3:
-                    score += 10
-                    signals.append("✅공매도 매우낮음")
-                elif short_ratio <= 5:
                     score += 5
-                    signals.append("📈공매도 낮음")
+                    signals.append("✅공매도낮음")
                 elif short_ratio >= 25:
-                    score -= 10
-                    signals.append("⚠️공매도 매우높음")
-                elif short_ratio >= 15:
                     score -= 5
-                    signals.append("⚠️공매도 높음")
+                    signals.append("⚠️공매도높음")
+                elif short_ratio >= 15:
+                    score -= 3
+
+            # === 8. PER/PBR 밸류에이션 (-5 ~ +15점, 신규) ===
+            if symbol in fundamental_cache:
+                f = fundamental_cache[symbol]
+                score += f['fundamental_score']
+                stock.per = f['per']
+                stock.pbr = f['pbr']
+                signals.extend(f['signals'])
+
+            # === 9. RSI (-5 ~ +10점, 신규) ===
+            if symbol in technical_cache:
+                t = technical_cache[symbol]
+                score += t['rsi_score']
+                stock.rsi = t['rsi']
+                # === 10. MACD (-5 ~ +10점, 신규) ===
+                score += t['macd_score']
+                signals.extend(t['signals'])
 
             stock.score = score
             stock.signals = signals
@@ -446,6 +603,9 @@ class KoreanStockRecommender:
                     'inst_rank': stock.inst_rank or '-',
                     'inst_억': int(stock.inst_amount / 1e8) if stock.inst_amount else 0,
                     'short_ratio': round(stock.short_ratio, 1),
+                    'per': round(stock.per, 1) if stock.per else '-',
+                    'pbr': round(stock.pbr, 2) if stock.pbr else '-',
+                    'rsi': round(stock.rsi, 0),
                     'price_change_5d': momentum.get('price_change_5d', 0),
                     'vol_change_pct': volume.get('vol_change_pct', 0),
                     'market_cap_조': cap_조,
@@ -458,7 +618,8 @@ class KoreanStockRecommender:
             result['rank'] = range(1, len(result) + 1)
             result = result[['rank', 'symbol', 'name', 'score', 'signals',
                            'foreign_rank', 'foreign_억', 'inst_rank', 'inst_억',
-                           'short_ratio', 'price_change_5d', 'vol_change_pct', 'market_cap_조']]
+                           'short_ratio', 'per', 'pbr', 'rsi',
+                           'price_change_5d', 'vol_change_pct', 'market_cap_조']]
 
         return result
 
