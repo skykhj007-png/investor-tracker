@@ -17,6 +17,7 @@ from src.analyzers.changes import ChangesAnalyzer
 from src.analyzers.korean_recommender import KoreanStockRecommender
 from src.analyzers.pension_recommender import PensionRecommender
 from src.analyzers.crypto_recommender import CryptoRecommender
+from src.analyzers.us_recommender import USStockRecommender
 from src.storage.database import Database
 
 # Page config
@@ -210,9 +211,21 @@ def cached_quick_picks(top_n):
 def cached_pension_accumulation(top_n):
     return PensionRecommender().get_accumulation_signals(top_n)
 
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_us_recommendations(top_n):
+    return USStockRecommender().get_recommendations(top_n)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_us_new_buys(top_n):
+    return USStockRecommender().get_new_buys(top_n)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_us_high_conviction(top_n):
+    return USStockRecommender().get_high_conviction(top_n)
+
 
 # 메뉴 목록
-MENU_ITEMS = ["🏠 홈", "💼 포트폴리오", "🔍 공통 종목", "📈 변화 분석", "🌐 Grand Portfolio", "🇰🇷 국내주식", "🎯 종목 추천", "💰 연금저축", "🪙 현물코인"]
+MENU_ITEMS = ["🏠 홈", "💼 포트폴리오", "🔍 공통 종목", "📈 변화 분석", "🌐 Grand Portfolio", "🇰🇷 국내주식", "🎯 종목 추천", "🌍 해외 종목 추천", "💰 연금저축", "🪙 현물코인"]
 
 # 네비게이션 콜백 함수
 def navigate_to(page_name):
@@ -1190,6 +1203,139 @@ elif page == "🎯 종목 추천":
     # Disclaimer
     st.markdown("---")
     st.caption("⚠️ **투자 유의사항**: 이 추천은 참고용이며 투자 권유가 아닙니다. 투자 결정은 본인의 판단과 책임하에 하시기 바랍니다.")
+    st.stop()
+
+
+# US Stock Recommendation page
+elif page == "🌍 해외 종목 추천":
+    st.title("🌍 해외(미국) AI 종목 추천")
+    st.markdown("*SEC 13F 공시 기반 슈퍼투자자 82명의 보유·매매 활동 종합 분석*")
+
+    st.info("""
+    **점수 산정 기준 (최대 100점):**
+    - 👥 보유 투자자 수: 최대 30점 (많을수록 시장 합의)
+    - 🆕 최근 매수 활동 (신규/추가): 최대 25점
+    - 💪 포트폴리오 비중 (확신도): 최대 20점
+    - 💰 가격 분석 (현재가 vs 매수가): 최대 15점
+    - ⭐ 유명 투자자 보유: 최대 10점
+    """)
+
+    tab1, tab2, tab3 = st.tabs(["🏆 종합 추천", "🆕 신규 매수", "💪 고확신 종목"])
+
+    with tab1:
+        st.subheader("종합 추천 TOP 20")
+
+        with st.spinner("슈퍼투자자 데이터 분석 중... (최대 2분 소요)"):
+            us_recs = cached_us_recommendations(top_n=20)
+
+        if not us_recs.empty:
+            # Score chart
+            fig = px.bar(
+                us_recs.head(15),
+                x='name',
+                y='score',
+                title="슈퍼투자자 종합 점수 TOP 15",
+                color='score',
+                color_continuous_scale="Bluered",
+                hover_data=['symbol', 'num_owners', 'signals'],
+            )
+            fig.update_layout(xaxis_tickangle=-45)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Top 5 cards
+            st.subheader("📋 추천 상세")
+            for _, row in us_recs.head(10).iterrows():
+                with st.expander(f"{row['rank']}. {row['name']} ({row['symbol']}) - 점수: {row['score']}"):
+                    col1, col2, col3, col4, col5 = st.columns(5)
+                    col1.metric("보유 투자자", f"{row['num_owners']}명")
+                    col2.metric("신규 매수", f"{row['new_buys']}건")
+                    col3.metric("추가 매수", f"{row['adds']}건")
+                    col4.metric("평균 비중", f"{row['avg_conviction']}%")
+
+                    if row['current_price'] > 0:
+                        col5.metric("현재가", f"${row['current_price']:,.1f}")
+                    else:
+                        col5.metric("현재가", "-")
+
+                    if row['famous_holders']:
+                        st.success(f"⭐ 유명 투자자: {row['famous_holders']}")
+                    st.markdown(f"**시그널**: {row['signals']}")
+
+            # Full table
+            st.subheader("📊 전체 추천 목록")
+            display_cols = ['rank', 'symbol', 'name', 'score', 'num_owners', 'new_buys', 'adds', 'reduces', 'avg_conviction', 'famous_holders', 'signals']
+            display_names = ['순위', '심볼', '종목명', '점수', '보유자수', '신규매수', '추가매수', '매도', '평균비중(%)', '유명투자자', '시그널']
+            display_df = us_recs[display_cols].copy()
+            display_df.columns = display_names
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+        else:
+            st.warning("추천 데이터를 가져올 수 없습니다.")
+
+    with tab2:
+        st.subheader("🆕 최근 신규 매수 종목")
+        st.markdown("*슈퍼투자자들이 최근 새로 편입한 종목 - 가장 강력한 매수 신호*")
+
+        with st.spinner("신규 매수 데이터 분석 중..."):
+            new_buys = cached_us_new_buys(top_n=15)
+
+        if not new_buys.empty:
+            fig = px.bar(
+                new_buys.head(10),
+                x='name',
+                y='buyer_count',
+                title="신규 매수 종목 (투자자 수 기준)",
+                color='avg_conviction',
+                color_continuous_scale="Viridis",
+                hover_data=['symbol', 'buyers'],
+            )
+            fig.update_layout(xaxis_tickangle=-45)
+            st.plotly_chart(fig, use_container_width=True)
+
+            for _, row in new_buys.iterrows():
+                with st.expander(f"{row['rank']}. {row['name']} ({row['symbol']}) - {row['buyer_count']}명 매수"):
+                    st.markdown(f"**매수 투자자**: {row['buyers']}")
+                    st.markdown(f"**평균 포트폴리오 비중**: {row['avg_conviction']:.1f}%")
+        else:
+            st.info("현재 신규 매수 데이터가 없습니다.")
+
+    with tab3:
+        st.subheader("💪 고확신 종목")
+        st.markdown("*포트폴리오 비중 5% 이상으로 보유한 종목 - 투자자의 높은 확신*")
+
+        with st.spinner("고확신 종목 분석 중..."):
+            high_conv = cached_us_high_conviction(top_n=15)
+
+        if not high_conv.empty:
+            fig = px.scatter(
+                high_conv,
+                x='holder_count',
+                y='max_conviction',
+                size='avg_conviction',
+                color='max_conviction',
+                text='name',
+                title="고확신 종목 (X: 보유자수, Y: 최대비중%)",
+                color_continuous_scale="YlOrRd",
+            )
+            fig.update_traces(textposition='top center')
+            fig.update_layout(
+                xaxis_title="고비중 보유 투자자 수",
+                yaxis_title="최대 포트폴리오 비중 (%)",
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            for _, row in high_conv.iterrows():
+                with st.expander(f"{row['rank']}. {row['name']} ({row['symbol']}) - 최대 {row['max_conviction']}%"):
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("고비중 보유자", f"{row['holder_count']}명")
+                    col2.metric("평균 비중", f"{row['avg_conviction']}%")
+                    col3.metric("최대 비중", f"{row['max_conviction']}%")
+                    st.markdown(f"**보유 투자자**: {row['holders']}")
+        else:
+            st.info("현재 고확신 종목 데이터가 없습니다.")
+
+    # Disclaimer
+    st.markdown("---")
+    st.caption("⚠️ **투자 유의사항**: 이 추천은 참고용이며 투자 권유가 아닙니다. 과거 투자자 행동이 미래 수익을 보장하지 않습니다.")
     st.stop()
 
 
