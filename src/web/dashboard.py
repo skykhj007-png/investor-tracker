@@ -82,21 +82,17 @@ def get_crypto_recommender():
 # 메뉴 목록
 MENU_ITEMS = ["🏠 홈", "💼 포트폴리오", "🔍 공통 종목", "📈 변화 분석", "🌐 Grand Portfolio", "🇰🇷 국내주식", "🎯 종목 추천", "💰 연금저축", "🪙 현물코인"]
 
-# 세션 상태 초기화
-if 'selected_page' not in st.session_state:
-    st.session_state.selected_page = "🏠 홈"
+# 네비게이션 콜백 함수
+def navigate_to(page_name):
+    st.session_state.nav_menu = page_name
 
 # Sidebar
 st.sidebar.title("📊 Investor Tracker")
 page = st.sidebar.radio(
     "메뉴",
     MENU_ITEMS,
-    index=MENU_ITEMS.index(st.session_state.selected_page),
-    key="sidebar_menu"
+    key="nav_menu"
 )
-
-# 사이드바에서 선택한 경우 동기화
-st.session_state.selected_page = page
 
 
 # Home page
@@ -138,9 +134,13 @@ if page == "🏠 홈":
             if i + j < len(menu_buttons):
                 icon, name, desc, page_key = menu_buttons[i + j]
                 with col:
-                    if st.button(f"{icon} {name}\n{desc}", key=f"menu_{page_key}", use_container_width=True):
-                        st.session_state.selected_page = page_key
-                        st.rerun()
+                    st.button(
+                        f"{icon} {name}\n{desc}",
+                        key=f"menu_{page_key}",
+                        use_container_width=True,
+                        on_click=navigate_to,
+                        args=(page_key,)
+                    )
 
 
 # Portfolio page
