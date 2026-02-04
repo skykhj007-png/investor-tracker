@@ -246,6 +246,25 @@ def get_investor_display_name(investor_id: str, name: str) -> str:
         return f"{kr_name} / {name} ({investor_id})"
     return f"{name} ({investor_id})"
 
+# 영문 Activity → 한글 변환
+ACTIVITY_KR = {
+    'Add': '➕ 추가 매수',
+    'New': '🆕 신규 매수',
+    'Reduce': '📉 일부 매도',
+    'Sold Out': '🔴 전량 매도',
+    'Unchanged': '— 변동 없음',
+}
+
+def translate_activity(activity: str) -> str:
+    """Dataroma 영문 activity를 한글로 변환."""
+    if not activity or pd.isna(activity):
+        return '— 변동 없음'
+    activity = str(activity).strip()
+    for eng, kr in ACTIVITY_KR.items():
+        if eng.lower() in activity.lower():
+            return kr
+    return activity  # 매칭 안 되면 원문 그대로
+
 # 메뉴 목록
 MENU_ITEMS = ["🏠 홈", "💼 포트폴리오", "🔍 공통 종목", "📈 변화 분석", "🌐 Grand Portfolio", "🇰🇷 국내주식", "🎯 종목 추천", "🌍 해외 종목 추천", "💰 연금저축", "🪙 현물코인"]
 
@@ -457,9 +476,12 @@ elif page == "💼 포트폴리오":
 
             # Table
             st.subheader("보유 종목 목록")
-            display_df = portfolio.head(top_n)[["symbol", "stock", "percent_portfolio", "shares", "value", "activity"]]
-            display_df.columns = ["심볼", "종목명", "비중(%)", "주식수", "가치($)", "최근활동"]
-            st.dataframe(display_df, use_container_width=True)
+            display_df = portfolio.head(top_n)[["symbol", "stock", "percent_portfolio", "shares", "value", "activity"]].copy()
+            display_df["activity"] = display_df["activity"].apply(translate_activity)
+            display_df.columns = ["티커", "종목명", "비중(%)", "보유 주수", "평가금액($)", "최근 활동"]
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+            st.caption("💡 **비중(%)**: 전체 포트폴리오에서 해당 종목이 차지하는 비율 | **최근 활동**: 직전 분기 대비 매수/매도 변화")
     st.stop()
 
 
@@ -485,11 +507,14 @@ elif page == "🔍 공통 종목":
             default=list(investor_options.keys())[:3] if len(investor_options) >= 3 else list(investor_options.keys())
         )
 
+        st.caption("💡 여러 슈퍼투자자가 동시에 보유한 종목 = 시장의 공통된 판단. 많은 투자자가 보유할수록 신뢰도 높음.")
+
         col1, col2 = st.columns(2)
         with col1:
             min_owners = st.slider("최소 보유자 수", 2, len(selected_investors) if selected_investors else 2, 2)
         with col2:
-            use_conviction = st.checkbox("확신도 점수 사용", value=False)
+            use_conviction = st.checkbox("확신도 점수 사용", value=False,
+                                          help="확신도 = 투자자들이 해당 종목에 포트폴리오의 몇 %를 투자했는지 가중 평균한 점수")
 
         if len(selected_investors) >= 2:
             investor_ids = [investor_options[s] for s in selected_investors]
@@ -506,19 +531,29 @@ elif page == "🔍 공통 종목":
 
                 if not result.empty:
                     # Chart
+                    y_col = "num_owners" if not use_conviction else "conviction_score"
+                    y_title = "보유 투자자 수" if not use_conviction else "확신도 점수"
                     fig = px.bar(
                         result.head(20),
                         x="symbol",
-                        y="num_owners" if not use_conviction else "conviction_score",
+                        y=y_col,
                         title="공통 보유 종목",
                         color="avg_percent",
                         color_continuous_scale="Greens",
                         hover_data=["stock", "avg_percent"],
                     )
+                    fig.update_layout(yaxis_title=y_title, xaxis_title="종목 티커")
                     st.plotly_chart(fig, use_container_width=True)
 
-                    # Table
-                    st.dataframe(result.head(30), use_container_width=True)
+                    # Table - 컬럼명 한글화
+                    overlap_display = result.head(30).copy()
+                    col_rename = {
+                        'symbol': '티커', 'stock': '종목명',
+                        'num_owners': '보유 투자자 수', 'avg_percent': '평균 비중(%)',
+                        'conviction_score': '확신도 점수', 'owners': '보유 투자자',
+                    }
+                    overlap_display = overlap_display.rename(columns={k: v for k, v in col_rename.items() if k in overlap_display.columns})
+                    st.dataframe(overlap_display, use_container_width=True, hide_index=True)
                 else:
                     st.info(f"{min_owners}명 이상이 공통 보유한 종목이 없습니다.")
             else:
@@ -560,34 +595,36 @@ elif page == "📈 변화 분석":
         st.error("투자자 목록을 가져올 수 없습니다.")
         investor_id = "BRK"
 
+    st.caption("💡 **사용법**: ① '현재 데이터 저장' 클릭 → 현재 포트폴리오를 해당 분기로 저장 ② 두 분기를 비교하여 매수/매도 변화를 확인")
+
     col1, col2, col3 = st.columns(3)
     with col1:
-        q1 = st.text_input("이전 분기", value="2024Q3")
+        q1 = st.text_input("이전 분기 (예: 2024Q3)", value="2024Q3")
     with col2:
-        q2 = st.text_input("현재 분기", value="2024Q4")
+        q2 = st.text_input("현재 분기 (예: 2024Q4)", value="2024Q4")
     with col3:
-        if st.button("현재 데이터 동기화"):
+        if st.button("📥 현재 데이터 저장", help="선택한 투자자의 현재 포트폴리오를 '현재 분기'로 저장합니다"):
             with st.spinner("동기화 중..."):
                 analyzer = ChangesAnalyzer(db=db, scraper=scraper)
                 analyzer.sync_portfolio(investor_id, q2)
                 st.success(f"{investor_id} 포트폴리오를 {q2}로 저장했습니다.")
                 st.rerun()
 
-    if st.button("변화 분석"):
+    if st.button("🔍 분기 비교 분석", help="이전 분기와 현재 분기의 포트폴리오를 비교합니다"):
         analyzer = ChangesAnalyzer(db=db, scraper=scraper)
         changes = analyzer.compare_quarters(investor_id, q1, q2)
 
         if changes.empty:
-            st.info("변화가 없거나 데이터가 부족합니다.")
+            st.info("변화가 없거나 데이터가 부족합니다. 먼저 '현재 데이터 저장'으로 분기 데이터를 저장해주세요.")
         else:
             # Summary
             summary = analyzer.get_activity_summary(investor_id, q1, q2)
 
             col1, col2, col3, col4 = st.columns(4)
-            col1.metric("신규 매수", summary["new_positions"], delta_color="normal")
-            col2.metric("완전 매도", summary["exits"], delta_color="inverse")
-            col3.metric("비중 증가", summary["increases"])
-            col4.metric("비중 감소", summary["decreases"])
+            col1.metric("🆕 신규 매수", summary["new_positions"], delta_color="normal")
+            col2.metric("🔴 완전 매도", summary["exits"], delta_color="inverse")
+            col3.metric("📈 비중 증가", summary["increases"])
+            col4.metric("📉 비중 감소", summary["decreases"])
 
             # Charts
             col1, col2 = st.columns(2)
@@ -595,25 +632,39 @@ elif page == "📈 변화 분석":
             with col1:
                 new_df = changes[changes["change_type"] == "NEW"]
                 if not new_df.empty:
-                    fig = px.bar(new_df, x="symbol", y="curr_percent", title="신규 매수 종목", color_discrete_sequence=["green"])
+                    fig = px.bar(new_df, x="symbol", y="curr_percent", title="🆕 신규 매수 종목 (현재 비중%)", color_discrete_sequence=["green"])
+                    fig.update_layout(xaxis_title="종목 티커", yaxis_title="포트폴리오 비중(%)")
                     st.plotly_chart(fig, use_container_width=True)
 
             with col2:
                 exit_df = changes[changes["change_type"] == "EXIT"]
                 if not exit_df.empty:
-                    fig = px.bar(exit_df, x="symbol", y="prev_percent", title="매도 종목", color_discrete_sequence=["red"])
+                    fig = px.bar(exit_df, x="symbol", y="prev_percent", title="🔴 매도 종목 (이전 비중%)", color_discrete_sequence=["red"])
+                    fig.update_layout(xaxis_title="종목 티커", yaxis_title="이전 비중(%)")
                     st.plotly_chart(fig, use_container_width=True)
 
-            # Full table
+            # Full table - 한글화
             st.subheader("전체 변화 내역")
-            st.dataframe(changes, use_container_width=True)
+            changes_display = changes.copy()
+            change_type_kr = {'NEW': '🆕 신규 매수', 'EXIT': '🔴 전량 매도', 'INCREASE': '📈 비중 증가', 'DECREASE': '📉 비중 감소', 'UNCHANGED': '— 변동 없음'}
+            if 'change_type' in changes_display.columns:
+                changes_display['change_type'] = changes_display['change_type'].map(change_type_kr).fillna(changes_display['change_type'])
+            col_rename = {
+                'symbol': '티커', 'stock': '종목명',
+                'change_type': '변화 유형',
+                'prev_percent': f'{q1} 비중(%)',
+                'curr_percent': f'{q2} 비중(%)',
+                'change_amount': '변화량(%)',
+            }
+            changes_display = changes_display.rename(columns={k: v for k, v in col_rename.items() if k in changes_display.columns})
+            st.dataframe(changes_display, use_container_width=True, hide_index=True)
     st.stop()
 
 
 # Grand Portfolio page
 elif page == "🌐 Grand Portfolio":
-    st.title("🌐 Grand Portfolio")
-    st.markdown("*전체 슈퍼투자자들이 가장 많이 보유한 종목*")
+    st.title("🌐 Grand Portfolio (슈퍼투자자 통합 포트폴리오)")
+    st.markdown("*82명의 슈퍼투자자가 가장 많이 보유한 종목 순위 — 투자자 수가 많을수록 시장의 합의가 높은 종목*")
 
     with st.spinner("Grand Portfolio 로딩..."):
         grand = cached_grand_portfolio()
@@ -621,6 +672,8 @@ elif page == "🌐 Grand Portfolio":
     if grand.empty:
         st.error("데이터를 가져올 수 없습니다.")
     else:
+        st.info("💡 **보유 투자자 수**가 많을수록 많은 슈퍼투자자가 해당 종목을 신뢰한다는 의미입니다. **매입가**는 투자자들의 평균 매입 가격입니다.")
+
         # Chart
         fig = px.bar(
             grand.head(30),
@@ -631,23 +684,25 @@ elif page == "🌐 Grand Portfolio":
             color_continuous_scale="Viridis",
             hover_data=["stock", "percent_total"],
         )
-        fig.update_layout(xaxis_tickangle=-45, yaxis_title="보유 투자자 수")
+        fig.update_layout(xaxis_tickangle=-45, yaxis_title="보유 투자자 수", xaxis_title="종목 티커")
         st.plotly_chart(fig, use_container_width=True)
 
         # Table
         display_cols = ["symbol", "stock", "num_owners", "percent_total"]
-        col_names = ["종목코드", "종목명", "보유 투자자 수", "비중(%)"]
+        col_names = ["티커", "종목명", "보유 투자자 수", "전체 비중(%)"]
 
         if "current_price" in grand.columns:
             display_cols.append("current_price")
             col_names.append("현재가($)")
         if "hold_price" in grand.columns:
             display_cols.append("hold_price")
-            col_names.append("매입가($)")
+            col_names.append("평균 매입가($)")
 
         display_df = grand.head(50)[display_cols].copy()
         display_df.columns = col_names
         st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+        st.caption("💡 **전체 비중(%)**: 전체 슈퍼투자자 합산 포트폴리오에서 차지하는 비율 | **평균 매입가**: 투자자들의 평균 매수 가격")
     st.stop()
 
 
@@ -1245,11 +1300,11 @@ elif page == "🌍 해외 종목 추천":
 
     st.info("""
     **점수 산정 기준 (최대 100점):**
-    - 👥 보유 투자자 수: 최대 30점 (많을수록 시장 합의)
-    - 🆕 최근 매수 활동 (신규/추가): 최대 25점
-    - 💪 포트폴리오 비중 (확신도): 최대 20점
-    - 💰 가격 분석 (현재가 vs 매수가): 최대 15점
-    - ⭐ 유명 투자자 보유: 최대 10점
+    - 👥 **보유 투자자 수** (30점): 많은 투자자가 보유 = 시장의 합의
+    - 🆕 **최근 매수 활동** (25점): 최근 새로 사거나 추가 매수한 종목 가점
+    - 💪 **포트폴리오 비중** (20점): 투자자가 전체 자산의 몇 %를 투자했는지 (높을수록 확신)
+    - 💰 **가격 분석** (15점): 현재가가 매수가보다 낮으면 저평가 가능성
+    - ⭐ **유명 투자자** (10점): 버핏, 소로스 등 유명 투자자 보유 시 가점
     """)
 
     tab1, tab2, tab3 = st.tabs(["🏆 종합 추천", "🆕 신규 매수", "💪 고확신 종목"])
@@ -1305,7 +1360,7 @@ elif page == "🌍 해외 종목 추천":
 
     with tab2:
         st.subheader("🆕 최근 신규 매수 종목")
-        st.markdown("*슈퍼투자자들이 최근 새로 편입한 종목 - 가장 강력한 매수 신호*")
+        st.markdown("*슈퍼투자자들이 최근 새로 사기 시작한 종목 — 기존에 없던 종목을 새로 매수한 것이므로 가장 강력한 관심 신호입니다*")
 
         with st.spinner("신규 매수 데이터 분석 중..."):
             new_buys = cached_us_new_buys(top_n=15)
@@ -1332,7 +1387,7 @@ elif page == "🌍 해외 종목 추천":
 
     with tab3:
         st.subheader("💪 고확신 종목")
-        st.markdown("*포트폴리오 비중 5% 이상으로 보유한 종목 - 투자자의 높은 확신*")
+        st.markdown("*투자자가 자산의 5% 이상을 투자한 종목 — 비중이 높을수록 그 종목에 대한 확신이 크다는 의미입니다*")
 
         with st.spinner("고확신 종목 분석 중..."):
             high_conv = cached_us_high_conviction(top_n=15)
@@ -1345,22 +1400,24 @@ elif page == "🌍 해외 종목 추천":
                 size='avg_conviction',
                 color='max_conviction',
                 text='name',
-                title="고확신 종목 (X: 보유자수, Y: 최대비중%)",
+                title="고확신 종목 (버블 크기 = 평균 투자 비중)",
                 color_continuous_scale="YlOrRd",
             )
             fig.update_traces(textposition='top center')
             fig.update_layout(
-                xaxis_title="고비중 보유 투자자 수",
-                yaxis_title="최대 포트폴리오 비중 (%)",
+                xaxis_title="5%↑ 투자한 투자자 수",
+                yaxis_title="최대 투자 비중 (%)",
             )
             st.plotly_chart(fig, use_container_width=True)
+
+            st.caption("💡 **최대 비중**: 가장 많이 투자한 투자자가 자산의 몇 %를 이 종목에 투자했는지 | **평균 비중**: 5%↑ 투자자들의 평균")
 
             for _, row in high_conv.iterrows():
                 with st.expander(f"{row['rank']}. {row['name']} ({row['symbol']}) - 최대 {row['max_conviction']}%"):
                     col1, col2, col3 = st.columns(3)
-                    col1.metric("고비중 보유자", f"{row['holder_count']}명")
-                    col2.metric("평균 비중", f"{row['avg_conviction']}%")
-                    col3.metric("최대 비중", f"{row['max_conviction']}%")
+                    col1.metric("5%↑ 보유자", f"{row['holder_count']}명", help="이 종목에 포트폴리오의 5% 이상을 투자한 투자자 수")
+                    col2.metric("평균 비중", f"{row['avg_conviction']}%", help="5%↑ 투자자들의 평균 투자 비중")
+                    col3.metric("최대 비중", f"{row['max_conviction']}%", help="가장 많이 투자한 투자자의 비중")
                     st.markdown(f"**보유 투자자**: {row['holders']}")
         else:
             st.info("현재 고확신 종목 데이터가 없습니다.")
