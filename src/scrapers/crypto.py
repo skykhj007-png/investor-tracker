@@ -186,7 +186,13 @@ class UpbitScraper:
 class BinanceScraper:
     """바이낸스 공개 API 스크래퍼."""
 
-    BASE_URL = "https://api.binance.com/api/v3"
+    # 여러 엔드포인트를 시도 (지역/네트워크에 따라 접근 가능한 URL이 다름)
+    API_URLS = [
+        "https://api.binance.com/api/v3",
+        "https://api1.binance.com/api/v3",
+        "https://api4.binance.com/api/v3",
+        "https://data-api.binance.vision/api/v3",
+    ]
 
     def __init__(self):
         self.session = requests.Session()
@@ -195,6 +201,25 @@ class BinanceScraper:
         })
         self._cache = _SimpleCache(ttl_seconds=60)
         self._candle_cache = _SimpleCache(ttl_seconds=300)
+        self._base_url = None  # 성공한 URL 캐시
+
+    def _get_base_url(self) -> str:
+        """접근 가능한 바이낸스 API URL 반환."""
+        if self._base_url:
+            return self._base_url
+
+        for url in self.API_URLS:
+            try:
+                resp = self.session.get(f"{url}/ping", timeout=5)
+                if resp.status_code == 200:
+                    self._base_url = url
+                    return url
+            except Exception:
+                continue
+
+        # 기본값
+        self._base_url = self.API_URLS[0]
+        return self._base_url
 
     def get_24hr_stats(self) -> pd.DataFrame:
         """24시간 전체 티커 통계 (USDT 마켓)."""
@@ -202,8 +227,9 @@ class BinanceScraper:
         if cached is not None:
             return cached
 
+        base_url = self._get_base_url()
         try:
-            resp = self.session.get(f"{self.BASE_URL}/ticker/24hr", timeout=10)
+            resp = self.session.get(f"{base_url}/ticker/24hr", timeout=15)
             data = resp.json()
 
             records = []
@@ -243,11 +269,12 @@ class BinanceScraper:
         if cached is not None:
             return cached
 
+        base_url = self._get_base_url()
         try:
             resp = self.session.get(
-                f"{self.BASE_URL}/klines",
+                f"{base_url}/klines",
                 params={"symbol": symbol, "interval": "1d", "limit": limit},
-                timeout=10
+                timeout=15
             )
             data = resp.json()
 

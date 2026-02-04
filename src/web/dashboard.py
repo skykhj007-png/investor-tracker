@@ -79,34 +79,30 @@ def get_crypto_recommender():
     return CryptoRecommender()
 
 
+# 메뉴 목록
+MENU_ITEMS = ["🏠 홈", "💼 포트폴리오", "🔍 공통 종목", "📈 변화 분석", "🌐 Grand Portfolio", "🇰🇷 국내주식", "🎯 종목 추천", "💰 연금저축", "🪙 현물코인"]
+
+# 세션 상태 초기화
+if 'selected_page' not in st.session_state:
+    st.session_state.selected_page = "🏠 홈"
+
 # Sidebar
 st.sidebar.title("📊 Investor Tracker")
 page = st.sidebar.radio(
     "메뉴",
-    ["🏠 홈", "💼 포트폴리오", "🔍 공통 종목", "📈 변화 분석", "🌐 Grand Portfolio", "🇰🇷 국내주식", "🎯 종목 추천", "💰 연금저축", "🪙 현물코인"]
+    MENU_ITEMS,
+    index=MENU_ITEMS.index(st.session_state.selected_page),
+    key="sidebar_menu"
 )
 
-# 페이지 전환 시 상태 초기화
-if 'current_page' not in st.session_state:
-    st.session_state.current_page = page
-
-if st.session_state.current_page != page:
-    # 페이지가 변경되면 캐시 클리어 및 상태 업데이트
-    st.session_state.current_page = page
-    st.cache_data.clear()
+# 사이드바에서 선택한 경우 동기화
+st.session_state.selected_page = page
 
 
 # Home page
 if page == "🏠 홈":
     st.title("🎯 Investor Tracker")
-    st.markdown("""
-    슈퍼투자자들의 포트폴리오를 추적하고 분석합니다.
-
-    - **포트폴리오**: 개별 투자자의 보유 종목 조회
-    - **공통 종목**: 여러 투자자가 공통으로 보유한 종목 분석
-    - **변화 분석**: 분기별 매수/매도 추적
-    - **Grand Portfolio**: 전체 슈퍼투자자 통합 포트폴리오
-    """)
+    st.markdown("슈퍼투자자들의 포트폴리오를 추적하고 분석합니다.")
 
     # Quick stats
     col1, col2, col3 = st.columns(3)
@@ -120,6 +116,31 @@ if page == "🏠 홈":
         st.metric("대표 투자자", "Warren Buffett")
     with col3:
         st.metric("데이터 소스", "Dataroma / SEC")
+
+    st.markdown("---")
+    st.subheader("메뉴 바로가기")
+
+    # 모바일용 메뉴 버튼 (2열 배치)
+    menu_buttons = [
+        ("💼", "포트폴리오", "개별 투자자 보유 종목 조회", "💼 포트폴리오"),
+        ("🔍", "공통 종목", "투자자 공통 보유 종목", "🔍 공통 종목"),
+        ("📈", "변화 분석", "분기별 매수/매도 추적", "📈 변화 분석"),
+        ("🌐", "Grand Portfolio", "전체 통합 포트폴리오", "🌐 Grand Portfolio"),
+        ("🇰🇷", "국내주식", "투자자 동향/공매도/매집", "🇰🇷 국내주식"),
+        ("🎯", "종목 추천", "AI 종합 종목 추천", "🎯 종목 추천"),
+        ("💰", "연금저축", "ETF 추천/심리분석", "💰 연금저축"),
+        ("🪙", "현물코인", "업비트/바이낸스 분석", "🪙 현물코인"),
+    ]
+
+    for i in range(0, len(menu_buttons), 2):
+        cols = st.columns(2)
+        for j, col in enumerate(cols):
+            if i + j < len(menu_buttons):
+                icon, name, desc, page_key = menu_buttons[i + j]
+                with col:
+                    if st.button(f"{icon} {name}\n{desc}", key=f"menu_{page_key}", use_container_width=True):
+                        st.session_state.selected_page = page_key
+                        st.rerun()
 
 
 # Portfolio page
