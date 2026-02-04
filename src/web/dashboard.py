@@ -141,6 +141,93 @@ def get_crypto_recommender():
     return CryptoRecommender()
 
 
+# ── 캐시 래퍼 함수들 (로딩 속도 개선) ──────────────────────
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_investor_list():
+    return DataromaScraper().get_investor_list()
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_grand_portfolio():
+    return DataromaScraper().get_grand_portfolio()
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_portfolio(investor_id):
+    return DataromaScraper().get_portfolio(investor_id)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_foreign_buying(top_n):
+    return KoreanStocksScraper().get_foreign_buying(top_n)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_institution_buying(top_n):
+    return KoreanStocksScraper().get_institution_buying(top_n)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_market_cap_top(market, top_n):
+    return KoreanStocksScraper().get_market_cap_top(market, top_n)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_short_volume(market, top_n):
+    return KoreanStocksScraper().get_short_volume(market, top_n)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_recommendations(top_n):
+    return KoreanStockRecommender().get_recommendations(top_n=top_n)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_dual_buying():
+    return KoreanStockRecommender().get_dual_buying_stocks()
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_contrarian():
+    return KoreanStockRecommender().get_contrarian_picks()
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_accumulation_signals(market, top_n):
+    return KoreanStockRecommender().get_accumulation_signals(market, top_n)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_strong_buy(market, top_n):
+    return KoreanStockRecommender().get_strong_buy_candidates(market, top_n)
+
+@st.cache_data(ttl=600, show_spinner=False)
+def cached_recent_disclosures(days, report_types_tuple):
+    report_types = list(report_types_tuple) if report_types_tuple else None
+    return KoreanStocksScraper().get_recent_disclosures(days=days, report_types=report_types)
+
+@st.cache_data(ttl=600, show_spinner=False)
+def cached_company_disclosures(company_name, days):
+    return KoreanStocksScraper().search_company_disclosures(company_name, days=days)
+
+@st.cache_data(ttl=600, show_spinner=False)
+def cached_disclosures_for_stocks(stock_names_tuple, days):
+    return KoreanStocksScraper().get_disclosures_for_stocks(list(stock_names_tuple), days=days)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_top_coins(exchange, top_n):
+    return CryptoScraper().get_top_coins(exchange, top_n)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_crypto_recommendations(exchange, top_n):
+    return CryptoRecommender().get_recommendations(exchange, top_n)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_volume_surge(exchange, top_n):
+    return CryptoRecommender().get_volume_surge_coins(exchange, top_n)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_movers(exchange, top_n):
+    return CryptoScraper().get_movers(exchange, top_n)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_quick_picks(top_n):
+    return PensionRecommender().get_quick_picks(top_n)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_pension_accumulation(top_n):
+    return PensionRecommender().get_accumulation_signals(top_n)
+
+
 # 메뉴 목록
 MENU_ITEMS = ["🏠 홈", "💼 포트폴리오", "🔍 공통 종목", "📈 변화 분석", "🌐 Grand Portfolio", "🇰🇷 국내주식", "🎯 종목 추천", "💰 연금저축", "🪙 현물코인"]
 
@@ -166,7 +253,7 @@ if page == "🏠 홈":
     col1, col2, col3 = st.columns(3)
 
     with st.spinner("데이터 로딩 중..."):
-        investors_df = scraper.get_investor_list()
+        investors_df = cached_investor_list()
 
     with col1:
         st.metric("추적 투자자 수", len(investors_df) if not investors_df.empty else 0)
@@ -302,7 +389,7 @@ elif page == "💼 포트폴리오":
 
     # Get investor list
     with st.spinner("투자자 목록 로딩..."):
-        investors_df = scraper.get_investor_list()
+        investors_df = cached_investor_list()
 
     if investors_df.empty:
         st.error("투자자 목록을 가져올 수 없습니다.")
@@ -323,7 +410,7 @@ elif page == "💼 포트폴리오":
 
         # Load portfolio
         with st.spinner(f"{investor_id} 포트폴리오 로딩..."):
-            portfolio = scraper.get_portfolio(investor_id)
+            portfolio = cached_portfolio(investor_id)
 
         if portfolio.empty:
             st.warning("포트폴리오 데이터가 없습니다.")
@@ -368,7 +455,7 @@ elif page == "🔍 공통 종목":
 
     # Get investor list
     with st.spinner("투자자 목록 로딩..."):
-        investors_df = scraper.get_investor_list()
+        investors_df = cached_investor_list()
 
     if investors_df.empty:
         st.error("투자자 목록을 가져올 수 없습니다.")
@@ -494,7 +581,7 @@ elif page == "🌐 Grand Portfolio":
     st.markdown("*전체 슈퍼투자자들이 가장 많이 보유한 종목*")
 
     with st.spinner("Grand Portfolio 로딩..."):
-        grand = scraper.get_grand_portfolio()
+        grand = cached_grand_portfolio()
 
     if grand.empty:
         st.error("데이터를 가져올 수 없습니다.")
@@ -546,7 +633,7 @@ elif page == "🇰🇷 국내주식":
         with col1:
             st.markdown("### 🌍 외국인 순매수")
             with st.spinner("외국인 데이터 로딩..."):
-                foreign_df = kr_scraper.get_foreign_buying(20)
+                foreign_df = cached_foreign_buying(20)
 
             if not foreign_df.empty:
                 # Format amounts
@@ -573,7 +660,7 @@ elif page == "🇰🇷 국내주식":
         with col2:
             st.markdown("### 🏛️ 기관 순매수")
             with st.spinner("기관 데이터 로딩..."):
-                inst_df = kr_scraper.get_institution_buying(20)
+                inst_df = cached_institution_buying(20)
 
             if not inst_df.empty:
                 inst_df['순매수(억)'] = (inst_df['net_amount'] / 100000000).round(0).astype(int)
@@ -604,7 +691,7 @@ elif page == "🇰🇷 국내주식":
             top_n = st.slider("종목 수", 10, 50, 30)
 
         with st.spinner(f"{market} 시총 상위 로딩..."):
-            cap_df = kr_scraper.get_market_cap_top(market, top_n)
+            cap_df = cached_market_cap_top(market, top_n)
 
         if not cap_df.empty:
             cap_df['시총(조)'] = (cap_df['market_cap'] / 1000000000000).round(1)
@@ -637,7 +724,7 @@ elif page == "🇰🇷 국내주식":
             short_market = st.selectbox("시장 선택", ["KOSPI", "KOSDAQ"], key="short_market")
 
         with st.spinner("공매도 데이터 로딩..."):
-            short_df = kr_scraper.get_short_volume(short_market, 30)
+            short_df = cached_short_volume(short_market, 30)
 
         if not short_df.empty:
             short_df['공매도(억)'] = (short_df['short_amount'] / 100000000).round(0).astype(int)
@@ -683,7 +770,7 @@ elif page == "🇰🇷 국내주식":
             acc_market = st.selectbox("시장", ["KOSPI", "KOSDAQ"], key="acc_market")
 
         with st.spinner("매집 신호 분석 중..."):
-            acc_signals = kr_recommender.get_accumulation_signals(acc_market, 20)
+            acc_signals = cached_accumulation_signals(acc_market, 20)
 
         if not acc_signals.empty:
             # 매집 점수 차트
@@ -735,7 +822,7 @@ elif page == "🇰🇷 국내주식":
         st.markdown("*수급 추천 + 매집 신호 모두 충족하는 종목*")
 
         with st.spinner("종합 분석 중..."):
-            strong_candidates = kr_recommender.get_strong_buy_candidates(acc_market, 5)
+            strong_candidates = cached_strong_buy(acc_market, 5)
 
         if strong_candidates['strong_picks']:
             st.success(f"✅ 강력 매수 후보 {len(strong_candidates['strong_picks'])}개 발견!")
@@ -786,13 +873,13 @@ elif page == "🇰🇷 국내주식":
 
     with tab6:
         st.subheader("📋 DART 전자공시")
-        st.markdown("*최근 주요 공시 (대량보유, 주요사항, 공정공시 등)*")
 
-        col_period, col_types = st.columns([1, 3])
-        with col_period:
-            dart_days = st.selectbox("조회 기간", [3, 7, 14, 30], index=1,
-                                      format_func=lambda x: f"최근 {x}일",
-                                      key="dart_days")
+        dart_mode = st.radio(
+            "조회 방식",
+            ["📰 최근 공시", "🔍 기업 검색", "📌 관심 종목 공시"],
+            horizontal=True,
+            key="dart_mode"
+        )
 
         type_options = {
             '대량보유': 'B001',
@@ -801,64 +888,164 @@ elif page == "🇰🇷 국내주식":
             '사업보고서': 'A001',
             '분기보고서': 'A003',
         }
-        with col_types:
-            selected_labels = st.multiselect(
-                "공시 유형",
+
+        if dart_mode == "📰 최근 공시":
+            st.markdown("*최근 주요 공시 (대량보유, 주요사항, 공정공시 등)*")
+
+            col_period, col_types = st.columns([1, 3])
+            with col_period:
+                dart_days = st.selectbox("조회 기간", [3, 7, 14, 30], index=1,
+                                          format_func=lambda x: f"최근 {x}일",
+                                          key="dart_days")
+
+            with col_types:
+                selected_labels = st.multiselect(
+                    "공시 유형",
+                    options=list(type_options.keys()),
+                    default=['대량보유', '주요사항'],
+                    key="dart_types"
+                )
+
+            selected_types = [type_options[label] for label in selected_labels] if selected_labels else None
+
+            with st.spinner("DART 공시 로딩..."):
+                types_tuple = tuple(selected_types) if selected_types else None
+                disclosures = cached_recent_disclosures(days=dart_days, report_types_tuple=types_tuple)
+
+            if not disclosures.empty:
+                st.success(f"총 {len(disclosures)}건의 공시")
+
+                # 필터 키워드
+                keyword_filter = st.text_input("🔎 제목 필터 (선택)", placeholder="예: 대량, 취득, 처분, 유상증자...", key="dart_title_filter")
+
+                filtered = disclosures
+                if keyword_filter:
+                    filtered = disclosures[disclosures['title'].str.contains(keyword_filter, case=False, na=False)]
+                    st.info(f"'{keyword_filter}' 포함 공시: {len(filtered)}건")
+
+                for _, row in filtered.iterrows():
+                    date_str = str(row['date'])
+                    if len(date_str) == 8:
+                        date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+                    type_badge = f"`{row['report_type']}`" if row.get('report_type') else ""
+                    st.markdown(
+                        f"**{date_str}** {type_badge} **{row['company']}** - "
+                        f"[{row['title']}]({row['url']})"
+                    )
+            else:
+                st.info("해당 기간의 공시가 없습니다.")
+
+        elif dart_mode == "🔍 기업 검색":
+            st.markdown("*기업명을 입력하여 관련 공시를 검색합니다 (정확한 기업명 입력)*")
+
+            col_search, col_days = st.columns([3, 1])
+            with col_search:
+                company_query = st.text_input("기업명 입력", placeholder="삼성전자, SK하이닉스, LG에너지솔루션...", key="dart_company_search")
+            with col_days:
+                search_days = st.selectbox("검색 기간", [7, 14, 30, 60, 90], index=2,
+                                            format_func=lambda x: f"최근 {x}일",
+                                            key="dart_search_days")
+
+            # 공시 유형 필터
+            search_types = st.multiselect(
+                "공시 유형 필터 (비워두면 전체)",
                 options=list(type_options.keys()),
-                default=['대량보유', '주요사항'],
-                key="dart_types"
+                default=[],
+                key="dart_search_types"
             )
 
-        selected_types = [type_options[label] for label in selected_labels] if selected_labels else None
+            if company_query:
+                with st.spinner(f"'{company_query}' 공시 검색 중..."):
+                    company_disclosures = cached_company_disclosures(company_query, days=search_days)
 
-        with st.spinner("DART 공시 로딩..."):
-            disclosures = kr_scraper.get_recent_disclosures(days=dart_days, report_types=selected_types)
+                if not company_disclosures.empty:
+                    # 유형 필터 적용
+                    if search_types:
+                        search_type_codes = [type_options[t] for t in search_types]
+                        # report_type 컬럼으로 필터
+                        type_name_map = {v: k for k, v in type_options.items()}
+                        company_disclosures = company_disclosures[
+                            company_disclosures['report_type'].isin(search_types) |
+                            company_disclosures['report_type'].isin(search_type_codes)
+                        ]
 
-        if not disclosures.empty:
-            st.success(f"총 {len(disclosures)}건의 공시")
+                    st.success(f"'{company_query}' 관련 공시 {len(company_disclosures)}건")
 
-            for _, row in disclosures.iterrows():
-                date_str = str(row['date'])
-                if len(date_str) == 8:
-                    date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
-                type_badge = f"`{row['report_type']}`" if row.get('report_type') else ""
-                st.markdown(
-                    f"**{date_str}** {type_badge} **{row['company']}** - "
-                    f"[{row['title']}]({row['url']})"
-                )
-        else:
-            st.info("해당 기간의 공시가 없습니다.")
+                    # 테이블 형태
+                    display_df = company_disclosures.copy()
+                    display_df['공시일'] = display_df['date'].apply(
+                        lambda x: f"{str(x)[:4]}-{str(x)[4:6]}-{str(x)[6:]}" if len(str(x)) == 8 else str(x)
+                    )
+                    display_df['기업명'] = display_df['company']
+                    display_df['유형'] = display_df['report_type']
+                    display_df['공시제목'] = display_df['title']
 
-        st.markdown("---")
-        st.subheader("🔍 기업별 공시 검색")
+                    st.dataframe(
+                        display_df[['공시일', '기업명', '유형', '공시제목']],
+                        use_container_width=True, hide_index=True
+                    )
 
-        company_query = st.text_input("기업명 입력", placeholder="삼성전자", key="dart_company_search")
-
-        if company_query:
-            with st.spinner(f"'{company_query}' 공시 검색 중..."):
-                company_disclosures = kr_scraper.search_company_disclosures(company_query, days=30)
-
-            if not company_disclosures.empty:
-                st.success(f"'{company_query}' 관련 공시 {len(company_disclosures)}건")
-
-                display_df = company_disclosures.copy()
-                display_df['공시일'] = display_df['date'].apply(
-                    lambda x: f"{str(x)[:4]}-{str(x)[4:6]}-{str(x)[6:]}" if len(str(x)) == 8 else str(x)
-                )
-                display_df['기업명'] = display_df['company']
-                display_df['유형'] = display_df['report_type']
-                display_df['공시제목'] = display_df['title']
-
-                st.dataframe(
-                    display_df[['공시일', '기업명', '유형', '공시제목']],
-                    use_container_width=True, hide_index=True
-                )
-
-                with st.expander("공시 원문 링크"):
+                    # 원문 링크
+                    st.subheader("📄 공시 원문 링크")
                     for _, row in company_disclosures.iterrows():
-                        st.markdown(f"- [{row['company']} - {row['title']}]({row['url']})")
-            else:
-                st.info(f"'{company_query}' 관련 최근 30일 공시가 없습니다.")
+                        date_str = str(row['date'])
+                        if len(date_str) == 8:
+                            date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+                        st.markdown(
+                            f"- **{date_str}** [{row['company']} - {row['title']}]({row['url']})"
+                        )
+                else:
+                    st.info(f"'{company_query}' 관련 최근 {search_days}일 공시가 없습니다.")
+                    st.caption("💡 DART는 정확한 기업명이 필요합니다. (예: '삼성' → '삼성전자')")
+
+        elif dart_mode == "📌 관심 종목 공시":
+            st.markdown("*여러 종목을 한 번에 입력하여 관련 공시를 조회합니다*")
+
+            stocks_input = st.text_area(
+                "종목명 입력 (쉼표로 구분)",
+                placeholder="삼성전자, SK하이닉스, LG에너지솔루션, 현대자동차",
+                key="dart_multi_stocks",
+                height=68,
+            )
+
+            col_d, col_t = st.columns([1, 3])
+            with col_d:
+                multi_days = st.selectbox("검색 기간", [7, 14, 30], index=1,
+                                           format_func=lambda x: f"최근 {x}일",
+                                           key="dart_multi_days")
+
+            if stocks_input:
+                stock_names = [s.strip() for s in stocks_input.split(",") if s.strip()]
+                if stock_names:
+                    with st.spinner(f"{len(stock_names)}개 종목 공시 조회 중..."):
+                        multi_disclosures = cached_disclosures_for_stocks(tuple(stock_names), days=multi_days)
+
+                    if not multi_disclosures.empty:
+                        st.success(f"총 {len(multi_disclosures)}건의 공시")
+
+                        # 종목별 탭
+                        found_companies = multi_disclosures['company'].unique().tolist()
+                        if len(found_companies) > 1:
+                            company_filter = st.multiselect(
+                                "종목 필터",
+                                options=found_companies,
+                                default=found_companies,
+                                key="dart_multi_filter"
+                            )
+                            multi_disclosures = multi_disclosures[multi_disclosures['company'].isin(company_filter)]
+
+                        for _, row in multi_disclosures.iterrows():
+                            date_str = str(row['date'])
+                            if len(date_str) == 8:
+                                date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+                            type_badge = f"`{row['report_type']}`" if row.get('report_type') else ""
+                            st.markdown(
+                                f"**{date_str}** {type_badge} **{row['company']}** - "
+                                f"[{row['title']}]({row['url']})"
+                            )
+                    else:
+                        st.info(f"입력한 종목의 최근 {multi_days}일 공시가 없습니다.")
+                        st.caption("💡 DART는 정확한 기업명이 필요합니다. (예: '삼성' → '삼성전자')")
 
 
 # Recommendation page
@@ -888,7 +1075,7 @@ elif page == "🎯 종목 추천":
         st.subheader("종합 추천 TOP 20")
 
         with st.spinner("데이터 분석 중..."):
-            recs = recommender.get_recommendations(top_n=20)
+            recs = cached_recommendations(top_n=20)
 
         if not recs.empty:
             # Score chart
@@ -931,8 +1118,7 @@ elif page == "🎯 종목 추천":
             top_stock_names = recs.head(5)['name'].tolist()
 
             with st.spinner("추천 종목 공시 조회 중..."):
-                rec_kr_scraper = get_kr_scraper()
-                rec_disclosures = rec_kr_scraper.get_disclosures_for_stocks(top_stock_names, days=14)
+                rec_disclosures = cached_disclosures_for_stocks(tuple(top_stock_names), days=14)
 
             if not rec_disclosures.empty:
                 for _, drow in rec_disclosures.head(15).iterrows():
@@ -954,7 +1140,7 @@ elif page == "🎯 종목 추천":
         st.markdown("*외국인과 기관이 동시에 순매수하는 종목 - 가장 강력한 시그널*")
 
         with st.spinner("분석 중..."):
-            dual = recommender.get_dual_buying_stocks()
+            dual = cached_dual_buying()
 
         if not dual.empty:
             # Chart
@@ -989,7 +1175,7 @@ elif page == "🎯 종목 추천":
         st.warning("⚠️ 고위험 투자 전략입니다. 공매도 비중이 높다는 것은 하락 압력이 있다는 의미이기도 합니다.")
 
         with st.spinner("분석 중..."):
-            contra = recommender.get_contrarian_picks()
+            contra = cached_contrarian()
 
         if not contra.empty:
             # Chart
@@ -1083,7 +1269,7 @@ elif page == "💰 연금저축":
         st.markdown("*연금저축 계좌에서 투자 가능한 국내 상장 ETF*")
 
         with st.spinner("ETF 데이터 로딩 중... (최대 1분 소요)"):
-            quick_picks = pension_recommender.get_quick_picks(15)
+            quick_picks = cached_quick_picks(15)
 
         if not quick_picks.empty:
             # 수익률 차트
@@ -1131,7 +1317,7 @@ elif page == "💰 연금저축":
         """)
 
         with st.spinner("매집 신호 분석 중..."):
-            accumulation_data = pension_recommender.get_accumulation_signals(15)
+            accumulation_data = cached_pension_accumulation(15)
 
         if not accumulation_data.empty:
             # 매집 점수 차트
@@ -1368,7 +1554,7 @@ elif page == "🪙 현물코인":
             top_n = st.slider("종목 수", 10, 50, 30, key="t1_topn")
 
         with st.spinner("시세 데이터 로딩..."):
-            top_coins = crypto_scraper.get_top_coins(ex_key, top_n)
+            top_coins = cached_top_coins(ex_key, top_n)
 
         if not top_coins.empty:
             # 주요 지표
@@ -1422,7 +1608,7 @@ elif page == "🪙 현물코인":
         ex_key2 = "upbit" if "업비트" in exchange2 else "binance"
 
         with st.spinner("데이터 분석 중..."):
-            movers = crypto_scraper.get_movers(ex_key2, 10)
+            movers = cached_movers(ex_key2, 10)
 
         col1, col2 = st.columns(2)
 
@@ -1476,7 +1662,7 @@ elif page == "🪙 현물코인":
         ex_key3 = "upbit" if "업비트" in exchange3 else "binance"
 
         with st.spinner("거래량 분석 중... (최대 1분 소요)"):
-            vol_surge = crypto_recommender.get_volume_surge_coins(ex_key3, 15)
+            vol_surge = cached_volume_surge(ex_key3, 15)
 
         if not vol_surge.empty:
             fig = px.bar(
@@ -1509,7 +1695,7 @@ elif page == "🪙 현물코인":
 
         # 코인 선택
         with st.spinner("코인 목록 로딩..."):
-            coins = crypto_scraper.get_top_coins(ex_key4, 30)
+            coins = cached_top_coins(ex_key4, 30)
 
         if not coins.empty:
             if ex_key4 == "upbit":
@@ -1644,7 +1830,7 @@ elif page == "🪙 현물코인":
         """)
 
         with st.spinner("종합 분석 중... (최대 2분 소요)"):
-            recommendations = crypto_recommender.get_recommendations(ex_key5, 20)
+            recommendations = cached_crypto_recommendations(ex_key5, 20)
 
         if not recommendations.empty:
             # 점수 차트
