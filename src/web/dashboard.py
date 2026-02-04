@@ -47,6 +47,55 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# 모바일 사이드바 토글 버튼 강조 CSS
+st.markdown("""
+<style>
+/* 사이드바 접힌 상태: 열기 버튼 강조 */
+[data-testid="collapsedControl"] {
+    background-color: #FF4B4B !important;
+    border-radius: 8px !important;
+    padding: 8px 12px !important;
+    box-shadow: 0 2px 8px rgba(255, 75, 75, 0.4) !important;
+}
+[data-testid="collapsedControl"] svg {
+    width: 24px !important;
+    height: 24px !important;
+    color: white !important;
+    stroke: white !important;
+}
+
+/* 사이드바 열린 상태: 닫기 버튼 */
+[data-testid="stSidebarCollapseButton"] button {
+    background-color: rgba(255, 75, 75, 0.8) !important;
+    border-radius: 8px !important;
+    color: white !important;
+}
+[data-testid="stSidebarCollapseButton"] button svg {
+    color: white !important;
+    stroke: white !important;
+}
+
+/* 모바일에서 메뉴 버튼 더 크게 */
+@media (max-width: 768px) {
+    [data-testid="collapsedControl"] {
+        position: fixed !important;
+        top: 10px !important;
+        left: 10px !important;
+        z-index: 999 !important;
+        padding: 12px 16px !important;
+        font-size: 18px !important;
+    }
+    [data-testid="collapsedControl"]::after {
+        content: " 메뉴" !important;
+        color: white !important;
+        font-size: 14px !important;
+        font-weight: bold !important;
+        margin-left: 4px !important;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
+
 # Initialize
 @st.cache_resource
 def get_scraper():
