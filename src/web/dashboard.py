@@ -224,6 +224,28 @@ def cached_us_high_conviction(top_n):
     return USStockRecommender().get_high_conviction(top_n)
 
 
+# 주요 슈퍼투자자 정보 (전역)
+FAMOUS_INVESTORS = {
+    'BRK': ('워렌 버핏', 'Berkshire Hathaway CEO. "가치투자의 아버지". 장기 우량주 집중 투자.'),
+    'icahn': ('칼 아이칸', '행동주의 투자자. 저평가 기업 인수 후 경영 개선 요구.'),
+    'soros': ('조지 소로스', '헤지펀드의 전설. 매크로 전략, "영란은행을 무너뜨린 남자".'),
+    'BRIDGEWATER': ('레이 달리오', 'Bridgewater Associates 설립자. 올웨더 포트폴리오 전략.'),
+    'einhorn': ('데이비드 아인혼', 'Greenlight Capital. 가치투자 + 숏 셀링 전문.'),
+    'ackman': ('빌 애크먼', 'Pershing Square. 소수 종목 집중 투자.'),
+    'BERKOWITZ': ('브루스 버코위츠', 'Fairholme Fund. 역발상 가치투자.'),
+    'tepper': ('데이비드 테퍼', 'Appaloosa Management. 부실채권·주식 투자.'),
+    'THIRD POINT': ('댄 로브', 'Third Point. 행동주의 + 이벤트 드리븐.'),
+    'BAUPOST': ('세스 클라만', 'Baupost Group. 안전마진 투자 철학.'),
+    'gates': ('빌 게이츠', 'Microsoft 공동창업자. 다양한 산업 분산 투자.'),
+}
+
+def get_investor_display_name(investor_id: str, name: str) -> str:
+    """투자자 ID와 영문명을 한글 포함 표시명으로 변환."""
+    if investor_id in FAMOUS_INVESTORS:
+        kr_name, _ = FAMOUS_INVESTORS[investor_id]
+        return f"{kr_name} / {name} ({investor_id})"
+    return f"{name} ({investor_id})"
+
 # 메뉴 목록
 MENU_ITEMS = ["🏠 홈", "💼 포트폴리오", "🔍 공통 종목", "📈 변화 분석", "🌐 Grand Portfolio", "🇰🇷 국내주식", "🎯 종목 추천", "🌍 해외 종목 추천", "💰 연금저축", "🪙 현물코인"]
 
@@ -367,21 +389,6 @@ if page == "🏠 홈":
 elif page == "💼 포트폴리오":
     st.title("💼 투자자 포트폴리오")
 
-    # 주요 투자자 설명
-    FAMOUS_INVESTORS = {
-        'BRK': ('워렌 버핏', 'Berkshire Hathaway CEO. "가치투자의 아버지". 장기 우량주 집중 투자.'),
-        'icahn': ('칼 아이칸', '행동주의 투자자. 저평가 기업 인수 후 경영 개선 요구.'),
-        'soros': ('조지 소로스', '헤지펀드의 전설. 매크로 전략, "영란은행을 무너뜨린 남자".'),
-        'BRIDGEWATER': ('레이 달리오', 'Bridgewater Associates 설립자. 올웨더 포트폴리오 전략.'),
-        'einhorn': ('데이비드 아인혼', 'Greenlight Capital. 가치투자 + 숏 셀링 전문.'),
-        'ackman': ('빌 애크먼', 'Pershing Square. 소수 종목 집중 투자.'),
-        'BERKOWITZ': ('브루스 버코위츠', 'Fairholme Fund. 역발상 가치투자.'),
-        'tepper': ('데이비드 테퍼', 'Appaloosa Management. 부실채권·주식 투자.'),
-        'THIRD POINT': ('댄 로브', 'Third Point. 행동주의 + 이벤트 드리븐.'),
-        'BAUPOST': ('세스 클라만', 'Baupost Group. 안전마진 투자 철학.'),
-        'gates': ('빌 게이츠', 'Microsoft 공동창업자. 다양한 산업 분산 투자.'),
-    }
-
     with st.expander("💡 **주요 슈퍼투자자 소개** (클릭하여 펼치기)", expanded=False):
         st.markdown("SEC 13F 공시 기반으로 82명의 슈퍼투자자 포트폴리오를 추적합니다.")
         for inv_id, (name, desc) in FAMOUS_INVESTORS.items():
@@ -395,9 +402,9 @@ elif page == "💼 포트폴리오":
     if investors_df.empty:
         st.error("투자자 목록을 가져올 수 없습니다.")
     else:
-        # Investor selector
+        # Investor selector with Korean names
         investor_options = {
-            f"{row['name']} ({row['investor_id']})": row['investor_id']
+            get_investor_display_name(row['investor_id'], row['name']): row['investor_id']
             for _, row in investors_df.iterrows()
         }
 
@@ -408,6 +415,11 @@ elif page == "💼 포트폴리오":
             top_n = st.number_input("상위 종목 수", min_value=5, max_value=50, value=15)
 
         investor_id = investor_options[selected]
+
+        # 선택된 투자자 설명 표시
+        if investor_id in FAMOUS_INVESTORS:
+            kr_name, desc = FAMOUS_INVESTORS[investor_id]
+            st.caption(f"ℹ️ **{kr_name}**: {desc}")
 
         # Load portfolio
         with st.spinner(f"{investor_id} 포트폴리오 로딩..."):
@@ -463,7 +475,7 @@ elif page == "🔍 공통 종목":
         st.error("투자자 목록을 가져올 수 없습니다.")
     else:
         investor_options = {
-            f"{row['name']} ({row['investor_id']})": row['investor_id']
+            get_investor_display_name(row['investor_id'], row['name']): row['investor_id']
             for _, row in investors_df.iterrows()
         }
 
@@ -520,14 +532,33 @@ elif page == "🔍 공통 종목":
 elif page == "📈 변화 분석":
     st.title("📈 분기별 변화 분석")
 
-    col1, col2 = st.columns(2)
+    # 투자자 목록 로딩
+    with st.spinner("투자자 목록 로딩..."):
+        changes_investors_df = cached_investor_list()
 
-    with col1:
-        investor_id = st.text_input("투자자 ID", value="BRK")
-    with col2:
-        # Check available quarters
-        quarters = db.get_available_quarters(investor_id)
-        st.write(f"저장된 분기: {quarters if quarters else '없음'}")
+    if not changes_investors_df.empty:
+        changes_investor_options = {
+            get_investor_display_name(row['investor_id'], row['name']): row['investor_id']
+            for _, row in changes_investors_df.iterrows()
+        }
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            changes_selected = st.selectbox("투자자 선택", list(changes_investor_options.keys()), key="changes_investor")
+            investor_id = changes_investor_options[changes_selected]
+
+            # 선택된 투자자 설명
+            if investor_id in FAMOUS_INVESTORS:
+                kr_name, desc = FAMOUS_INVESTORS[investor_id]
+                st.caption(f"ℹ️ **{kr_name}**: {desc}")
+        with col2:
+            # Check available quarters
+            quarters = db.get_available_quarters(investor_id)
+            st.write(f"저장된 분기: {quarters if quarters else '없음'}")
+    else:
+        st.error("투자자 목록을 가져올 수 없습니다.")
+        investor_id = "BRK"
 
     col1, col2, col3 = st.columns(3)
     with col1:
