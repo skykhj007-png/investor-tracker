@@ -27,9 +27,10 @@ st.set_page_config(
     layout="wide",
 )
 
-# Auto refresh every 5 minutes (300 seconds)
+# Auto refresh every 5 minutes (300 seconds) + 모바일 viewport 설정
 st.markdown(
-    '<meta http-equiv="refresh" content="300">',
+    '''<meta http-equiv="refresh" content="300">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">''',
     unsafe_allow_html=True,
 )
 
@@ -93,6 +94,134 @@ st.markdown("""
     font-size: 18px !important;
     font-weight: 600 !important;
     color: #FF4B4B !important;
+}
+
+/* ========== 모바일 최적화 스타일 ========== */
+@media (max-width: 768px) {
+    /* 메인 컨텐츠 영역 패딩 축소 */
+    .main .block-container {
+        padding: 1rem 0.5rem !important;
+        max-width: 100% !important;
+    }
+
+    /* 제목 크기 조정 */
+    h1 {
+        font-size: 1.5rem !important;
+        line-height: 1.3 !important;
+    }
+    h2 {
+        font-size: 1.25rem !important;
+    }
+    h3 {
+        font-size: 1.1rem !important;
+    }
+
+    /* 메트릭 카드 컴팩트화 */
+    [data-testid="stMetric"] {
+        padding: 0.5rem !important;
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 0.75rem !important;
+    }
+    [data-testid="stMetricValue"] {
+        font-size: 1.1rem !important;
+    }
+    [data-testid="stMetricDelta"] {
+        font-size: 0.7rem !important;
+    }
+
+    /* 버튼 터치 친화적 크기 */
+    .stButton > button {
+        padding: 0.6rem 1rem !important;
+        font-size: 0.9rem !important;
+        min-height: 44px !important;
+        width: 100% !important;
+    }
+
+    /* 테이블 가로 스크롤 */
+    [data-testid="stDataFrame"],
+    .stDataFrame {
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+    }
+    [data-testid="stDataFrame"] table {
+        font-size: 0.75rem !important;
+    }
+
+    /* 탭 버튼 컴팩트화 */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 0 !important;
+        flex-wrap: wrap !important;
+    }
+    .stTabs [data-baseweb="tab"] {
+        padding: 0.5rem 0.6rem !important;
+        font-size: 0.75rem !important;
+        flex: 1 1 auto !important;
+        min-width: fit-content !important;
+    }
+
+    /* 셀렉트박스, 인풋 필드 */
+    .stSelectbox, .stTextInput, .stNumberInput {
+        font-size: 16px !important; /* iOS 확대 방지 */
+    }
+
+    /* 차트 높이 조정 */
+    .js-plotly-plot {
+        height: auto !important;
+        min-height: 250px !important;
+    }
+
+    /* 컬럼 스택 (2열 이상 → 1열) */
+    [data-testid="column"] {
+        width: 100% !important;
+        flex: 1 1 100% !important;
+    }
+
+    /* expander 컴팩트화 */
+    .streamlit-expanderHeader {
+        font-size: 0.9rem !important;
+        padding: 0.5rem !important;
+    }
+
+    /* 마크다운 텍스트 */
+    .stMarkdown p {
+        font-size: 0.9rem !important;
+        line-height: 1.5 !important;
+    }
+
+    /* info/warning/error 박스 */
+    .stAlert {
+        padding: 0.5rem !important;
+        font-size: 0.85rem !important;
+    }
+}
+
+/* 중간 화면 (태블릿) */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .main .block-container {
+        padding: 1rem 1rem !important;
+    }
+
+    h1 {
+        font-size: 1.75rem !important;
+    }
+
+    [data-testid="stMetricValue"] {
+        font-size: 1.3rem !important;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        padding: 0.6rem 0.8rem !important;
+        font-size: 0.85rem !important;
+    }
+}
+
+/* 터치 디바이스 호버 효과 제거 */
+@media (hover: none) {
+    .stButton > button:hover {
+        transform: none !important;
+        box-shadow: none !important;
+    }
 }
 </style>
 """, unsafe_allow_html=True)
