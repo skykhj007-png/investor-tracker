@@ -357,31 +357,41 @@ def cached_us_stock_analysis(symbol):
     """미국 주식 분석 결과 캐시 (5분)."""
     return USStockRecommender().analyze_stock(symbol)
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_resource(show_spinner=False)
 def cached_kr_ticker_list():
-    """전체 국내 주식 티커 목록 캐시 (1시간) - 검색 속도 향상용."""
+    """전체 국내 주식 티커 목록 캐시 (세션 영구) - 검색 속도 향상용."""
     try:
         from pykrx import stock as krx
         from datetime import datetime, timedelta
 
         # 최근 거래일 찾기
+        trd_date = None
         for i in range(7):
-            trd_date = (datetime.now() - timedelta(days=i)).strftime("%Y%m%d")
+            test_date = (datetime.now() - timedelta(days=i)).strftime("%Y%m%d")
             try:
-                kospi = krx.get_market_ticker_list(trd_date, market="KOSPI")
-                if kospi:
+                test_list = krx.get_market_ticker_list(test_date, market="KOSPI")
+                if test_list:
+                    trd_date = test_date
                     break
             except:
                 continue
 
-        kospi = krx.get_market_ticker_list(trd_date, market="KOSPI")
-        kosdaq = krx.get_market_ticker_list(trd_date, market="KOSDAQ")
+        if not trd_date:
+            return pd.DataFrame()
+
+        # 시가총액 데이터로 한 번에 조회 (훨씬 빠름)
+        kospi_cap = krx.get_market_cap_by_ticker(trd_date, market="KOSPI")
+        kosdaq_cap = krx.get_market_cap_by_ticker(trd_date, market="KOSDAQ")
 
         ticker_data = []
-        for ticker in kospi:
+
+        # KOSPI - 인덱스가 티커 코드
+        for ticker in kospi_cap.index:
             name = krx.get_market_ticker_name(ticker)
             ticker_data.append({'symbol': ticker, 'name': name, 'market': 'KOSPI'})
-        for ticker in kosdaq:
+
+        # KOSDAQ
+        for ticker in kosdaq_cap.index:
             name = krx.get_market_ticker_name(ticker)
             ticker_data.append({'symbol': ticker, 'name': name, 'market': 'KOSDAQ'})
 
@@ -391,15 +401,34 @@ def cached_kr_ticker_list():
 
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_kr_search_stock(query):
-    """국내 주식 검색 캐시 (5분)."""
+    """국내 주식 검색 - 코드 직접 검색 우선 (빠름)."""
+    from pykrx import stock as krx
+
+    results = []
+    query_clean = query.strip()
+
+    # 1) 종목코드로 직접 검색 (6자리 숫자) - 즉시 응답
+    if query_clean.isdigit() and len(query_clean) == 6:
+        try:
+            name = krx.get_market_ticker_name(query_clean)
+            if name:
+                return pd.DataFrame([{
+                    'symbol': query_clean,
+                    'name': name,
+                    'market': 'KOSPI/KOSDAQ'
+                }])
+        except:
+            pass
+
+    # 2) 이름 검색 - 캐시된 전체 목록 사용
     all_tickers = cached_kr_ticker_list()
     if all_tickers.empty:
         return pd.DataFrame()
 
-    query_upper = query.upper()
+    query_upper = query_clean.upper()
     # 종목코드나 종목명에 검색어가 포함된 것 찾기
     mask = all_tickers['symbol'].str.contains(query_upper, na=False) | \
-           all_tickers['name'].str.contains(query, na=False)
+           all_tickers['name'].str.contains(query_clean, na=False)
     results = all_tickers[mask].head(20).copy()
     return results
 
@@ -1188,11 +1217,37 @@ elif page == "🇰🇷 국내주식":
         st.subheader("🔍 종목 검색 및 분석")
         st.markdown("*종목명/코드를 입력하면 차트, 기술적 지표, 매수 판단 정보를 제공합니다*")
 
-        query = st.text_input("종목명 또는 코드 입력", placeholder="삼성전자, 005930, SK하이닉스...")
+        st.info("💡 **빠른 검색 팁**: 종목코드 6자리(예: 005930)를 입력하면 즉시 검색됩니다!")
+
+        # 인기 종목 바로가기
+        st.markdown("**🔥 인기 종목 바로가기:**")
+        popular_kr = [
+            ("005930", "삼성전자"), ("000660", "SK하이닉스"), ("373220", "LG에너지솔루션"),
+            ("035420", "NAVER"), ("005380", "현대차"), ("000270", "기아"),
+            ("035720", "카카오"), ("006400", "삼성SDI")
+        ]
+
+        # 인기 종목 버튼 클릭 시 설정된 값 확인
+        default_kr_query = st.session_state.get("_selected_kr_stock", "")
+        if default_kr_query:
+            del st.session_state["_selected_kr_stock"]
+
+        cols = st.columns(4)
+        for i, (code, name) in enumerate(popular_kr):
+            if cols[i % 4].button(f"{name}", key=f"pop_kr_{code}"):
+                st.session_state["_selected_kr_stock"] = code
+                st.rerun()
+
+        query = st.text_input("종목명 또는 코드 입력", value=default_kr_query, placeholder="005930, 삼성전자, SK하이닉스...")
 
         if query:
-            with st.spinner("검색 중..."):
-                results = cached_kr_search_stock(query)
+            # 종목코드 직접 입력 시 빠른 검색
+            if query.strip().isdigit() and len(query.strip()) == 6:
+                with st.spinner("종목 조회 중..."):
+                    results = cached_kr_search_stock(query)
+            else:
+                with st.spinner("종목 검색 중... (첫 검색 시 목록 로딩으로 시간이 걸릴 수 있습니다)"):
+                    results = cached_kr_search_stock(query)
 
             if not results.empty:
                 # 종목 선택
