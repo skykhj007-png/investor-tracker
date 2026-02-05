@@ -223,6 +223,50 @@ def cached_us_new_buys(top_n):
 def cached_us_high_conviction(top_n):
     return USStockRecommender().get_high_conviction(top_n)
 
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_us_stock_analysis(symbol):
+    """미국 주식 분석 결과 캐시 (5분)."""
+    return USStockRecommender().analyze_stock(symbol)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_kr_stock_ohlcv(symbol):
+    """국내 주식 OHLCV 캐시 (5분)."""
+    try:
+        from pykrx import stock as krx
+        from datetime import datetime, timedelta
+
+        end_date = datetime.now().strftime("%Y%m%d")
+        start_date = (datetime.now() - timedelta(days=180)).strftime("%Y%m%d")
+
+        ohlcv = krx.get_market_ohlcv_by_date(start_date, end_date, symbol)
+        if ohlcv.empty:
+            return None
+
+        ohlcv = ohlcv.reset_index()
+        ohlcv.columns = ['date', 'open', 'high', 'low', 'close', 'volume', 'value', 'change']
+
+        # 이동평균선
+        ohlcv['ma5'] = ohlcv['close'].rolling(window=5).mean()
+        ohlcv['ma20'] = ohlcv['close'].rolling(window=20).mean()
+        ohlcv['ma60'] = ohlcv['close'].rolling(window=60).mean()
+
+        # 볼린저밴드
+        ohlcv['bb_mid'] = ohlcv['close'].rolling(window=20).mean()
+        ohlcv['bb_std'] = ohlcv['close'].rolling(window=20).std()
+        ohlcv['bb_upper'] = ohlcv['bb_mid'] + (ohlcv['bb_std'] * 2)
+        ohlcv['bb_lower'] = ohlcv['bb_mid'] - (ohlcv['bb_std'] * 2)
+
+        # RSI
+        delta = ohlcv['close'].diff()
+        gain = delta.clip(lower=0).rolling(window=14).mean()
+        loss = (-delta.clip(upper=0)).rolling(window=14).mean()
+        rs = gain / loss
+        ohlcv['rsi'] = 100 - (100 / (1 + rs))
+
+        return ohlcv
+    except Exception:
+        return None
+
 
 # 주요 슈퍼투자자 정보 (전역)
 FAMOUS_INVESTORS = {
@@ -954,75 +998,44 @@ elif page == "🇰🇷 국내주식":
                         # 기본 정보
                         stock_info = kr_scraper.get_stock_price(selected_symbol)
 
-                        # 차트 데이터 (pykrx)
-                        try:
-                            from pykrx import stock as krx
-                            from datetime import datetime, timedelta
+                        # 차트 데이터 (캐시 사용)
+                        ohlcv = cached_kr_stock_ohlcv(selected_symbol)
 
-                            end_date = datetime.now().strftime("%Y%m%d")
-                            start_date = (datetime.now() - timedelta(days=180)).strftime("%Y%m%d")
+                        if ohlcv is not None and not ohlcv.empty:
+                            latest = ohlcv.iloc[-1]
+                            price = latest['close']
+                            ma5 = latest['ma5'] if pd.notna(latest['ma5']) else 0
+                            ma20 = latest['ma20'] if pd.notna(latest['ma20']) else 0
+                            ma60 = latest['ma60'] if pd.notna(latest['ma60']) else 0
+                            rsi = latest['rsi'] if pd.notna(latest['rsi']) else 50
+                            bb_upper = latest['bb_upper'] if pd.notna(latest['bb_upper']) else 0
+                            bb_lower = latest['bb_lower'] if pd.notna(latest['bb_lower']) else 0
 
-                            ohlcv = krx.get_market_ohlcv_by_date(start_date, end_date, selected_symbol)
+                            # 기본 정보 표시
+                            st.markdown(f"## {selected_name} ({selected_symbol})")
 
-                            if not ohlcv.empty:
-                                ohlcv = ohlcv.reset_index()
-                                ohlcv.columns = ['date', 'open', 'high', 'low', 'close', 'volume', 'value', 'change']
+                            if stock_info:
+                                col1, col2, col3, col4 = st.columns(4)
+                                col1.metric("현재가", f"{stock_info.get('close', 0):,}원", f"{stock_info.get('change', 0):+.2f}%")
+                                col2.metric("거래량", f"{stock_info.get('volume', 0):,}")
+                                col3.metric("시가", f"{stock_info.get('open', 0):,}원")
+                                col4.metric("고가/저가", f"{stock_info.get('high', 0):,} / {stock_info.get('low', 0):,}")
 
-                                # 이동평균선
-                                ohlcv['ma5'] = ohlcv['close'].rolling(window=5).mean()
-                                ohlcv['ma20'] = ohlcv['close'].rolling(window=20).mean()
-                                ohlcv['ma60'] = ohlcv['close'].rolling(window=60).mean()
+                            # ─── 매수 신호 분석 ───
+                            st.markdown("---")
+                            signals = []
+                            buy_score = 50
 
-                                # 볼린저밴드
-                                ohlcv['bb_mid'] = ohlcv['close'].rolling(window=20).mean()
-                                ohlcv['bb_std'] = ohlcv['close'].rolling(window=20).std()
-                                ohlcv['bb_upper'] = ohlcv['bb_mid'] + (ohlcv['bb_std'] * 2)
-                                ohlcv['bb_lower'] = ohlcv['bb_mid'] - (ohlcv['bb_std'] * 2)
-
-                                # RSI 계산
-                                def calc_rsi(series, period=14):
-                                    delta = series.diff()
-                                    gain = delta.clip(lower=0).rolling(window=period).mean()
-                                    loss = (-delta.clip(upper=0)).rolling(window=period).mean()
-                                    rs = gain / loss
-                                    return 100 - (100 / (1 + rs))
-
-                                ohlcv['rsi'] = calc_rsi(ohlcv['close'])
-
-                                latest = ohlcv.iloc[-1]
-                                price = latest['close']
-                                ma5 = latest['ma5'] if pd.notna(latest['ma5']) else 0
-                                ma20 = latest['ma20'] if pd.notna(latest['ma20']) else 0
-                                ma60 = latest['ma60'] if pd.notna(latest['ma60']) else 0
-                                rsi = latest['rsi'] if pd.notna(latest['rsi']) else 50
-                                bb_upper = latest['bb_upper'] if pd.notna(latest['bb_upper']) else 0
-                                bb_lower = latest['bb_lower'] if pd.notna(latest['bb_lower']) else 0
-
-                                # 기본 정보 표시
-                                st.markdown(f"## {selected_name} ({selected_symbol})")
-
-                                if stock_info:
-                                    col1, col2, col3, col4 = st.columns(4)
-                                    col1.metric("현재가", f"{stock_info.get('close', 0):,}원", f"{stock_info.get('change', 0):+.2f}%")
-                                    col2.metric("거래량", f"{stock_info.get('volume', 0):,}")
-                                    col3.metric("시가", f"{stock_info.get('open', 0):,}원")
-                                    col4.metric("고가/저가", f"{stock_info.get('high', 0):,} / {stock_info.get('low', 0):,}")
-
-                                # ─── 매수 신호 분석 ───
-                                st.markdown("---")
-                                signals = []
-                                buy_score = 50
-
-                                # 이동평균선 분석
-                                if ma5 > 0 and ma20 > 0:
-                                    if price > ma5 > ma20:
-                                        signals.append('📈 정배열 (상승 추세)')
-                                        buy_score += 10
-                                    elif price < ma5 < ma20:
-                                        signals.append('📉 역배열 (하락 추세)')
-                                        buy_score -= 10
-                                    # 골든크로스 체크
-                                    if len(ohlcv) > 2:
+                            # 이동평균선 분석
+                            if ma5 > 0 and ma20 > 0:
+                                if price > ma5 > ma20:
+                                    signals.append('📈 정배열 (상승 추세)')
+                                    buy_score += 10
+                                elif price < ma5 < ma20:
+                                    signals.append('📉 역배열 (하락 추세)')
+                                    buy_score -= 10
+                                # 골든크로스 체크
+                                if len(ohlcv) > 2:
                                         prev_ma5 = ohlcv['ma5'].iloc[-2]
                                         prev_ma20 = ohlcv['ma20'].iloc[-2]
                                         if pd.notna(prev_ma5) and pd.notna(prev_ma20):
@@ -1136,12 +1149,8 @@ elif page == "🇰🇷 국내주식":
                                 fig_rsi.update_layout(height=300, yaxis_title="RSI")
                                 st.plotly_chart(fig_rsi, use_container_width=True)
 
-                            else:
-                                st.warning("차트 데이터를 가져올 수 없습니다.")
-                        except ImportError:
-                            st.error("pykrx 라이브러리가 필요합니다.")
-                        except Exception as e:
-                            st.error(f"분석 중 오류: {e}")
+                        else:
+                            st.warning("차트 데이터를 가져올 수 없습니다.")
             else:
                 st.info("검색 결과가 없습니다.")
         else:
@@ -1618,9 +1627,8 @@ elif page == "🌍 해외 종목 추천":
         ).strip().upper()
 
         if us_symbol:
-            with st.spinner(f"{us_symbol} 분석 중... (최대 30초 소요)"):
-                us_recommender = USStockRecommender()
-                analysis = us_recommender.analyze_stock(us_symbol)
+            with st.spinner(f"{us_symbol} 분석 중..."):
+                analysis = cached_us_stock_analysis(us_symbol)
 
             if analysis.get('error'):
                 st.error(f"오류: {analysis['error']}")
