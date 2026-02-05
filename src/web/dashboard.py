@@ -576,7 +576,7 @@ def translate_activity(activity: str) -> str:
     return activity  # 매칭 안 되면 원문 그대로
 
 # 메뉴 목록
-MENU_ITEMS = ["🏠 홈", "💼 포트폴리오", "🔍 공통 종목", "📈 변화 분석", "🌐 Grand Portfolio", "🇰🇷 국내주식", "🎯 종목 추천", "🌍 해외 종목 추천", "💰 연금저축", "🪙 현물코인"]
+MENU_ITEMS = ["🏠 홈", "📌 내 관심종목", "💼 포트폴리오", "🔍 공통 종목", "📈 변화 분석", "🌐 Grand Portfolio", "🇰🇷 국내주식", "🎯 종목 추천", "🌍 해외 종목 추천", "💰 연금저축", "🪙 현물코인"]
 
 # 네비게이션 콜백 함수
 def navigate_to(page_name):
@@ -614,6 +614,7 @@ if page == "🏠 홈":
 
     # 모바일용 메뉴 버튼 (2열 배치)
     menu_buttons = [
+        ("📌", "내 관심종목", "보유/관심 종목 실시간 알림", "📌 내 관심종목"),
         ("💼", "포트폴리오", "개별 투자자 보유 종목 조회", "💼 포트폴리오"),
         ("🔍", "공통 종목", "투자자 공통 보유 종목", "🔍 공통 종목"),
         ("📈", "변화 분석", "분기별 매수/매도 추적", "📈 변화 분석"),
@@ -708,6 +709,280 @@ if page == "🏠 홈":
 
     st.markdown("---")
     st.caption("데이터는 5분마다 자동 갱신됩니다. 왼쪽 사이드바 또는 위 버튼으로 메뉴를 이동하세요.")
+    st.stop()
+
+
+# 내 관심종목 page
+elif page == "📌 내 관심종목":
+    st.title("📌 내 관심종목 모니터링")
+    st.markdown("*보유/관심 종목을 등록하면 공시, 매집신호, 기술적 분석을 한 곳에서 확인할 수 있습니다*")
+
+    # 세션에 관심종목 저장
+    if "watchlist_kr" not in st.session_state:
+        st.session_state.watchlist_kr = []
+    if "watchlist_us" not in st.session_state:
+        st.session_state.watchlist_us = []
+
+    # 종목 추가 UI
+    st.subheader("➕ 관심종목 추가")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("**🇰🇷 국내주식**")
+        kr_input = st.text_input("종목코드 (6자리)", placeholder="005930", key="kr_add_input")
+        if st.button("추가", key="add_kr"):
+            if kr_input and len(kr_input.strip()) == 6 and kr_input.strip().isdigit():
+                code = kr_input.strip()
+                if code not in st.session_state.watchlist_kr:
+                    st.session_state.watchlist_kr.append(code)
+                    st.success(f"{code} 추가됨")
+                    st.rerun()
+                else:
+                    st.warning("이미 등록된 종목입니다.")
+            else:
+                st.error("6자리 숫자를 입력하세요")
+
+    with col2:
+        st.markdown("**🇺🇸 미국주식**")
+        us_input = st.text_input("티커 (예: AAPL)", placeholder="AAPL", key="us_add_input")
+        if st.button("추가", key="add_us"):
+            if us_input and us_input.strip():
+                ticker = us_input.strip().upper()
+                if ticker not in st.session_state.watchlist_us:
+                    st.session_state.watchlist_us.append(ticker)
+                    st.success(f"{ticker} 추가됨")
+                    st.rerun()
+                else:
+                    st.warning("이미 등록된 종목입니다.")
+            else:
+                st.error("티커를 입력하세요")
+
+    # 현재 등록된 종목 표시
+    st.markdown("---")
+    st.subheader("📋 등록된 관심종목")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**🇰🇷 국내주식**")
+        if st.session_state.watchlist_kr:
+            for code in st.session_state.watchlist_kr:
+                c1, c2 = st.columns([3, 1])
+                c1.write(f"• {code}")
+                if c2.button("❌", key=f"del_kr_{code}"):
+                    st.session_state.watchlist_kr.remove(code)
+                    st.rerun()
+        else:
+            st.caption("등록된 국내주식이 없습니다")
+
+    with col2:
+        st.markdown("**🇺🇸 미국주식**")
+        if st.session_state.watchlist_us:
+            for ticker in st.session_state.watchlist_us:
+                c1, c2 = st.columns([3, 1])
+                c1.write(f"• {ticker}")
+                if c2.button("❌", key=f"del_us_{ticker}"):
+                    st.session_state.watchlist_us.remove(ticker)
+                    st.rerun()
+        else:
+            st.caption("등록된 미국주식이 없습니다")
+
+    # 관심종목 분석 결과
+    if st.session_state.watchlist_kr or st.session_state.watchlist_us:
+        st.markdown("---")
+        st.subheader("📊 관심종목 분석")
+
+        tab1, tab2, tab3 = st.tabs(["📋 전자공시", "💎 매집신호", "📈 기술적 분석"])
+
+        # ─── 전자공시 탭 ───
+        with tab1:
+            if st.session_state.watchlist_kr:
+                st.markdown("### 🇰🇷 국내주식 최근 공시")
+                try:
+                    # 종목명 조회
+                    from pykrx import stock as krx
+                    stock_names = []
+                    for code in st.session_state.watchlist_kr:
+                        try:
+                            name = krx.get_market_ticker_name(code)
+                            if name:
+                                stock_names.append(name)
+                        except:
+                            pass
+
+                    if stock_names:
+                        with st.spinner("공시 조회 중..."):
+                            disclosures = cached_disclosures_for_stocks(tuple(stock_names), 30)
+
+                        if not disclosures.empty:
+                            for _, row in disclosures.iterrows():
+                                report_type = row.get('report_type', '')
+                                # 공시 유형별 아이콘
+                                if '대량보유' in str(report_type):
+                                    icon = "📊"
+                                elif '주요사항' in str(report_type):
+                                    icon = "⚡"
+                                elif '공정공시' in str(report_type):
+                                    icon = "📢"
+                                else:
+                                    icon = "📄"
+
+                                st.markdown(f"""
+                                {icon} **{row.get('company', '')}** - {row.get('title', '')}
+                                - 📅 {row.get('date', '')} | {report_type}
+                                - [DART 원문 보기]({row.get('url', '#')})
+                                """)
+                            st.caption(f"최근 30일 내 {len(disclosures)}건의 공시")
+                        else:
+                            st.info("최근 30일 내 관련 공시가 없습니다.")
+                    else:
+                        st.warning("종목명을 확인할 수 없습니다.")
+                except Exception as e:
+                    st.error(f"공시 조회 오류: {e}")
+            else:
+                st.info("국내주식을 등록하면 DART 전자공시를 확인할 수 있습니다.")
+
+        # ─── 매집신호 탭 ───
+        with tab2:
+            if st.session_state.watchlist_kr:
+                st.markdown("### 🇰🇷 국내주식 매집 신호")
+                for code in st.session_state.watchlist_kr:
+                    try:
+                        with st.spinner(f"{code} 분석 중..."):
+                            ohlcv = cached_kr_stock_ohlcv(code)
+                            stock_info = cached_kr_stock_price(code)
+
+                        if ohlcv is not None and not ohlcv.empty and stock_info:
+                            name = stock_info.get('name', code)
+                            latest = ohlcv.iloc[-1]
+                            price = latest['close']
+
+                            # 매집 신호 분석
+                            signals = []
+                            score = 50
+
+                            # 거래량 분석
+                            if len(ohlcv) > 20:
+                                avg_vol = ohlcv['volume'].tail(20).mean()
+                                today_vol = latest['volume']
+                                if today_vol > avg_vol * 2:
+                                    signals.append("🔥 거래량 폭증 (2배 이상)")
+                                    score += 15
+                                elif today_vol > avg_vol * 1.5:
+                                    signals.append("📈 거래량 급증 (1.5배)")
+                                    score += 10
+
+                            # RSI 분석
+                            rsi = latest.get('rsi', 50)
+                            if pd.notna(rsi):
+                                if rsi < 30:
+                                    signals.append(f"💚 RSI {rsi:.0f} 과매도")
+                                    score += 15
+                                elif rsi > 70:
+                                    signals.append(f"🔴 RSI {rsi:.0f} 과매수")
+                                    score -= 10
+
+                            # 이평선 분석
+                            ma5 = latest.get('ma5', 0)
+                            ma20 = latest.get('ma20', 0)
+                            if pd.notna(ma5) and pd.notna(ma20) and ma5 > 0 and ma20 > 0:
+                                if price > ma5 > ma20:
+                                    signals.append("📈 정배열")
+                                    score += 10
+                                elif price < ma5 < ma20:
+                                    signals.append("📉 역배열")
+                                    score -= 10
+
+                            # 결과 표시
+                            with st.expander(f"**{name}** ({code}) - 매집점수: {score}", expanded=True):
+                                col1, col2 = st.columns([1, 2])
+                                col1.metric("현재가", f"{int(price):,}원", f"{stock_info.get('change', 0):+.2f}%")
+                                col2.write("**신호:**")
+                                if signals:
+                                    for sig in signals:
+                                        col2.write(f"• {sig}")
+                                else:
+                                    col2.write("• 특이 신호 없음")
+                    except Exception as e:
+                        st.warning(f"{code} 분석 실패: {e}")
+
+            if st.session_state.watchlist_us:
+                st.markdown("### 🇺🇸 미국주식 슈퍼투자자 보유 현황")
+                for ticker in st.session_state.watchlist_us:
+                    try:
+                        with st.spinner(f"{ticker} 분석 중..."):
+                            analysis = cached_us_stock_analysis(ticker)
+
+                        if not analysis.get('error'):
+                            with st.expander(f"**{analysis['name']}** ({ticker}) - 슈퍼투자자 {analysis['num_super_investors']}명", expanded=True):
+                                col1, col2 = st.columns([1, 2])
+                                col1.metric("현재가", f"${analysis['current_price']:.2f}", f"{analysis['change_pct']:+.2f}%")
+
+                                if analysis['super_investors']:
+                                    col2.write("**보유 투자자:**")
+                                    for inv in analysis['super_investors'][:5]:
+                                        col2.write(f"• {inv['name']} ({inv['percent']:.1f}%)")
+                                else:
+                                    col2.write("• 슈퍼투자자 보유 없음")
+                        else:
+                            st.warning(f"{ticker}: {analysis['error']}")
+                    except Exception as e:
+                        st.warning(f"{ticker} 분석 실패: {e}")
+
+            if not st.session_state.watchlist_kr and not st.session_state.watchlist_us:
+                st.info("종목을 등록하면 매집 신호를 분석합니다.")
+
+        # ─── 기술적 분석 탭 ───
+        with tab3:
+            if st.session_state.watchlist_kr:
+                st.markdown("### 🇰🇷 국내주식 기술적 지표")
+                kr_data = []
+                for code in st.session_state.watchlist_kr:
+                    try:
+                        ohlcv = cached_kr_stock_ohlcv(code)
+                        stock_info = cached_kr_stock_price(code)
+                        if ohlcv is not None and not ohlcv.empty and stock_info:
+                            latest = ohlcv.iloc[-1]
+                            kr_data.append({
+                                '종목': stock_info.get('name', code),
+                                '코드': code,
+                                '현재가': f"{int(latest['close']):,}",
+                                'RSI': f"{latest.get('rsi', 50):.0f}" if pd.notna(latest.get('rsi')) else '-',
+                                'MA5': f"{int(latest.get('ma5', 0)):,}" if pd.notna(latest.get('ma5')) else '-',
+                                'MA20': f"{int(latest.get('ma20', 0)):,}" if pd.notna(latest.get('ma20')) else '-',
+                            })
+                    except:
+                        pass
+                if kr_data:
+                    st.dataframe(pd.DataFrame(kr_data), use_container_width=True, hide_index=True)
+
+            if st.session_state.watchlist_us:
+                st.markdown("### 🇺🇸 미국주식 기술적 지표")
+                us_data = []
+                for ticker in st.session_state.watchlist_us:
+                    try:
+                        analysis = cached_us_stock_analysis(ticker)
+                        if not analysis.get('error'):
+                            us_data.append({
+                                '종목': analysis['name'],
+                                '티커': ticker,
+                                '현재가': f"${analysis['current_price']:.2f}",
+                                'RSI': f"{analysis['rsi']:.0f}",
+                                '매수점수': analysis['buy_score'],
+                                '판단': analysis['recommendation'],
+                            })
+                    except:
+                        pass
+                if us_data:
+                    st.dataframe(pd.DataFrame(us_data), use_container_width=True, hide_index=True)
+
+            if not st.session_state.watchlist_kr and not st.session_state.watchlist_us:
+                st.info("종목을 등록하면 기술적 분석을 제공합니다.")
+
+    else:
+        st.info("👆 위에서 관심종목을 추가하면 실시간 분석 결과를 확인할 수 있습니다.")
+
+    st.markdown("---")
+    st.caption("💡 관심종목은 브라우저 세션에 저장되며, 페이지를 새로고침하면 초기화됩니다.")
     st.stop()
 
 
