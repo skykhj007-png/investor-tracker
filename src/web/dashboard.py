@@ -228,6 +228,88 @@ def cached_us_stock_analysis(symbol):
     """미국 주식 분석 결과 캐시 (5분)."""
     return USStockRecommender().analyze_stock(symbol)
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def cached_kr_ticker_list():
+    """전체 국내 주식 티커 목록 캐시 (1시간) - 검색 속도 향상용."""
+    try:
+        from pykrx import stock as krx
+        from datetime import datetime, timedelta
+
+        # 최근 거래일 찾기
+        for i in range(7):
+            trd_date = (datetime.now() - timedelta(days=i)).strftime("%Y%m%d")
+            try:
+                kospi = krx.get_market_ticker_list(trd_date, market="KOSPI")
+                if kospi:
+                    break
+            except:
+                continue
+
+        kospi = krx.get_market_ticker_list(trd_date, market="KOSPI")
+        kosdaq = krx.get_market_ticker_list(trd_date, market="KOSDAQ")
+
+        ticker_data = []
+        for ticker in kospi:
+            name = krx.get_market_ticker_name(ticker)
+            ticker_data.append({'symbol': ticker, 'name': name, 'market': 'KOSPI'})
+        for ticker in kosdaq:
+            name = krx.get_market_ticker_name(ticker)
+            ticker_data.append({'symbol': ticker, 'name': name, 'market': 'KOSDAQ'})
+
+        return pd.DataFrame(ticker_data)
+    except Exception:
+        return pd.DataFrame()
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_kr_search_stock(query):
+    """국내 주식 검색 캐시 (5분)."""
+    all_tickers = cached_kr_ticker_list()
+    if all_tickers.empty:
+        return pd.DataFrame()
+
+    query_upper = query.upper()
+    # 종목코드나 종목명에 검색어가 포함된 것 찾기
+    mask = all_tickers['symbol'].str.contains(query_upper, na=False) | \
+           all_tickers['name'].str.contains(query, na=False)
+    results = all_tickers[mask].head(20).copy()
+    return results
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_kr_stock_price(symbol):
+    """국내 주식 현재가 캐시 (5분)."""
+    try:
+        from pykrx import stock as krx
+        from datetime import datetime, timedelta
+
+        # 최근 거래일 찾기
+        for i in range(7):
+            trd_date = (datetime.now() - timedelta(days=i)).strftime("%Y%m%d")
+            try:
+                df = krx.get_market_ohlcv_by_date(trd_date, trd_date, symbol)
+                if not df.empty:
+                    break
+            except:
+                continue
+
+        if df.empty:
+            return {}
+
+        row = df.iloc[0]
+        name = krx.get_market_ticker_name(symbol)
+
+        return {
+            'symbol': symbol,
+            'name': name,
+            'close': row['종가'],
+            'open': row['시가'],
+            'high': row['고가'],
+            'low': row['저가'],
+            'volume': row['거래량'],
+            'change': row.get('등락률', 0),
+        }
+    except Exception:
+        return {}
+
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_kr_stock_ohlcv(symbol):
     """국내 주식 OHLCV 캐시 (5분)."""
@@ -981,7 +1063,7 @@ elif page == "🇰🇷 국내주식":
 
         if query:
             with st.spinner("검색 중..."):
-                results = kr_scraper.search_stock(query)
+                results = cached_kr_search_stock(query)
 
             if not results.empty:
                 # 종목 선택
@@ -995,8 +1077,8 @@ elif page == "🇰🇷 국내주식":
                     selected_name = results[results['symbol']==selected_symbol]['name'].values[0]
 
                     with st.spinner(f"{selected_name} 분석 중..."):
-                        # 기본 정보
-                        stock_info = kr_scraper.get_stock_price(selected_symbol)
+                        # 기본 정보 (캐시 사용)
+                        stock_info = cached_kr_stock_price(selected_symbol)
 
                         # 차트 데이터 (캐시 사용)
                         ohlcv = cached_kr_stock_ohlcv(selected_symbol)
