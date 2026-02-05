@@ -9,16 +9,70 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from src.scrapers.dataroma import DataromaScraper
-from src.scrapers.korean_stocks import KoreanStocksScraper
-from src.scrapers.crypto import CryptoScraper
-from src.analyzers.overlap import OverlapAnalyzer
-from src.analyzers.changes import ChangesAnalyzer
-from src.analyzers.korean_recommender import KoreanStockRecommender
-from src.analyzers.pension_recommender import PensionRecommender
-from src.analyzers.crypto_recommender import CryptoRecommender
-from src.analyzers.us_recommender import USStockRecommender
-from src.storage.database import Database
+# ── 지연 로딩 (Lazy Import) - 시작 속도 최적화 ──
+# Scraper/Analyzer 모듈은 실제 사용 시에만 import됨 (pykrx 등 무거운 의존성)
+
+@st.cache_resource
+def get_dataroma_scraper():
+    """DataromaScraper 지연 로딩."""
+    from src.scrapers.dataroma import DataromaScraper
+    return DataromaScraper()
+
+@st.cache_resource
+def get_kr_scraper():
+    """KoreanStocksScraper 지연 로딩."""
+    from src.scrapers.korean_stocks import KoreanStocksScraper
+    return KoreanStocksScraper()
+
+@st.cache_resource
+def get_crypto_scraper():
+    """CryptoScraper 지연 로딩."""
+    from src.scrapers.crypto import CryptoScraper
+    return CryptoScraper()
+
+@st.cache_resource
+def get_overlap_analyzer():
+    """OverlapAnalyzer 지연 로딩."""
+    from src.analyzers.overlap import OverlapAnalyzer
+    return OverlapAnalyzer()
+
+@st.cache_resource
+def get_changes_analyzer():
+    """ChangesAnalyzer 지연 로딩."""
+    from src.analyzers.changes import ChangesAnalyzer
+    return ChangesAnalyzer()
+
+@st.cache_resource
+def get_recommender():
+    """KoreanStockRecommender 지연 로딩."""
+    from src.analyzers.korean_recommender import KoreanStockRecommender
+    return KoreanStockRecommender()
+
+@st.cache_resource
+def get_pension_recommender():
+    """PensionRecommender 지연 로딩."""
+    from src.analyzers.pension_recommender import PensionRecommender
+    return PensionRecommender()
+
+@st.cache_resource
+def get_crypto_recommender():
+    """CryptoRecommender 지연 로딩."""
+    from src.analyzers.crypto_recommender import CryptoRecommender
+    return CryptoRecommender()
+
+@st.cache_resource
+def get_us_recommender():
+    """USStockRecommender 지연 로딩."""
+    from src.analyzers.us_recommender import USStockRecommender
+    return USStockRecommender()
+
+@st.cache_resource
+def get_database():
+    """Database 지연 로딩."""
+    from src.storage.database import Database
+    db = Database()
+    db.init_db()
+    return db
 
 # Page config
 st.set_page_config(
@@ -226,136 +280,108 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Initialize
-@st.cache_resource
-def get_database():
-    db = Database()
-    db.init_db()
-    return db
-
-# Fresh instances (no caching to avoid stale class issues)
-scraper = DataromaScraper()
-db = get_database()
-
-# 각 페이지별로 필요한 인스턴스만 지연 생성하는 함수
-def get_kr_scraper():
-    return KoreanStocksScraper()
-
-def get_recommender():
-    return KoreanStockRecommender()
-
-def get_pension_recommender():
-    return PensionRecommender()
-
-def get_crypto_scraper():
-    return CryptoScraper()
-
-def get_crypto_recommender():
-    return CryptoRecommender()
-
-
 # ── 캐시 래퍼 함수들 (로딩 속도 개선) ──────────────────────
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_investor_list():
-    return DataromaScraper().get_investor_list()
+    return get_dataroma_scraper().get_investor_list()
 
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_grand_portfolio():
-    return DataromaScraper().get_grand_portfolio()
+    return get_dataroma_scraper().get_grand_portfolio()
 
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_portfolio(investor_id):
-    return DataromaScraper().get_portfolio(investor_id)
+    return get_dataroma_scraper().get_portfolio(investor_id)
 
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_foreign_buying(top_n):
-    return KoreanStocksScraper().get_foreign_buying(top_n)
+    return get_kr_scraper().get_foreign_buying(top_n)
 
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_institution_buying(top_n):
-    return KoreanStocksScraper().get_institution_buying(top_n)
+    return get_kr_scraper().get_institution_buying(top_n)
 
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_market_cap_top(market, top_n):
-    return KoreanStocksScraper().get_market_cap_top(market, top_n)
+    return get_kr_scraper().get_market_cap_top(market, top_n)
 
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_short_volume(market, top_n):
-    return KoreanStocksScraper().get_short_volume(market, top_n)
+    return get_kr_scraper().get_short_volume(market, top_n)
 
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_recommendations(top_n):
-    return KoreanStockRecommender().get_recommendations(top_n=top_n)
+    return get_recommender().get_recommendations(top_n=top_n)
 
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_dual_buying():
-    return KoreanStockRecommender().get_dual_buying_stocks()
+    return get_recommender().get_dual_buying_stocks()
 
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_contrarian():
-    return KoreanStockRecommender().get_contrarian_picks()
+    return get_recommender().get_contrarian_picks()
 
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_accumulation_signals(market, top_n):
-    return KoreanStockRecommender().get_accumulation_signals(market, top_n)
+    return get_recommender().get_accumulation_signals(market, top_n)
 
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_strong_buy(market, top_n):
-    return KoreanStockRecommender().get_strong_buy_candidates(market, top_n)
+    return get_recommender().get_strong_buy_candidates(market, top_n)
 
 @st.cache_data(ttl=600, show_spinner=False)
 def cached_recent_disclosures(days, report_types_tuple):
     report_types = list(report_types_tuple) if report_types_tuple else None
-    return KoreanStocksScraper().get_recent_disclosures(days=days, report_types=report_types)
+    return get_kr_scraper().get_recent_disclosures(days=days, report_types=report_types)
 
 @st.cache_data(ttl=600, show_spinner=False)
 def cached_company_disclosures(company_name, days):
-    return KoreanStocksScraper().search_company_disclosures(company_name, days=days)
+    return get_kr_scraper().search_company_disclosures(company_name, days=days)
 
 @st.cache_data(ttl=600, show_spinner=False)
 def cached_disclosures_for_stocks(stock_names_tuple, days):
-    return KoreanStocksScraper().get_disclosures_for_stocks(list(stock_names_tuple), days=days)
+    return get_kr_scraper().get_disclosures_for_stocks(list(stock_names_tuple), days=days)
 
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_top_coins(exchange, top_n):
-    return CryptoScraper().get_top_coins(exchange, top_n)
+    return get_crypto_scraper().get_top_coins(exchange, top_n)
 
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_crypto_recommendations(exchange, top_n):
-    return CryptoRecommender().get_recommendations(exchange, top_n)
+    return get_crypto_recommender().get_recommendations(exchange, top_n)
 
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_volume_surge(exchange, top_n):
-    return CryptoRecommender().get_volume_surge_coins(exchange, top_n)
+    return get_crypto_recommender().get_volume_surge_coins(exchange, top_n)
 
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_movers(exchange, top_n):
-    return CryptoScraper().get_movers(exchange, top_n)
+    return get_crypto_scraper().get_movers(exchange, top_n)
 
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_quick_picks(top_n):
-    return PensionRecommender().get_quick_picks(top_n)
+    return get_pension_recommender().get_quick_picks(top_n)
 
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_pension_accumulation(top_n):
-    return PensionRecommender().get_accumulation_signals(top_n)
+    return get_pension_recommender().get_accumulation_signals(top_n)
 
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_us_recommendations(top_n):
-    return USStockRecommender().get_recommendations(top_n)
+    return get_us_recommender().get_recommendations(top_n)
 
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_us_new_buys(top_n):
-    return USStockRecommender().get_new_buys(top_n)
+    return get_us_recommender().get_new_buys(top_n)
 
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_us_high_conviction(top_n):
-    return USStockRecommender().get_high_conviction(top_n)
+    return get_us_recommender().get_high_conviction(top_n)
 
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_us_stock_analysis(symbol):
     """미국 주식 분석 결과 캐시 (5분)."""
-    return USStockRecommender().analyze_stock(symbol)
+    return get_us_recommender().analyze_stock(symbol)
 
 @st.cache_resource(show_spinner=False)
 def cached_kr_ticker_list():
@@ -870,7 +896,7 @@ elif page == "📈 변화 분석":
                 st.caption(f"ℹ️ **{kr_name}**: {desc}")
         with col2:
             # Check available quarters
-            quarters = db.get_available_quarters(investor_id)
+            quarters = get_database().get_available_quarters(investor_id)
             st.write(f"저장된 분기: {quarters if quarters else '없음'}")
     else:
         st.error("투자자 목록을 가져올 수 없습니다.")
