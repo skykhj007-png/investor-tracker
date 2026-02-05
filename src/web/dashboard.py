@@ -573,14 +573,11 @@ if page == "🏠 홈":
     st.title("🎯 Investor Tracker")
     st.markdown("슈퍼투자자들의 포트폴리오를 추적하고 분석합니다.")
 
-    # Quick stats
+    # Quick stats (정적 값 - API 호출 없이 즉시 표시)
     col1, col2, col3 = st.columns(3)
 
-    with st.spinner("데이터 로딩 중..."):
-        investors_df = cached_investor_list()
-
     with col1:
-        st.metric("추적 투자자 수", len(investors_df) if not investors_df.empty else 0)
+        st.metric("추적 투자자 수", "80+")
     with col2:
         st.metric("대표 투자자", "Warren Buffett")
     with col3:
