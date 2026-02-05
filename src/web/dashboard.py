@@ -930,37 +930,222 @@ elif page == "🇰🇷 국내주식":
             st.info("현재 수급과 매집 신호를 동시에 만족하는 종목이 없습니다.")
 
     with tab5:
-        st.subheader("종목 검색")
+        st.subheader("🔍 종목 검색 및 분석")
+        st.markdown("*종목명/코드를 입력하면 차트, 기술적 지표, 매수 판단 정보를 제공합니다*")
 
-        query = st.text_input("종목명 또는 코드 입력", placeholder="삼성전자, 005930")
+        query = st.text_input("종목명 또는 코드 입력", placeholder="삼성전자, 005930, SK하이닉스...")
 
         if query:
             with st.spinner("검색 중..."):
                 results = kr_scraper.search_stock(query)
 
             if not results.empty:
-                st.dataframe(results, use_container_width=True, hide_index=True)
+                # 종목 선택
+                selected_symbol = st.selectbox(
+                    "분석할 종목 선택",
+                    results['symbol'].tolist(),
+                    format_func=lambda x: f"{x} - {results[results['symbol']==x]['name'].values[0]}"
+                )
 
-                # Show selected stock details
-                if len(results) > 0:
-                    selected_symbol = st.selectbox(
-                        "종목 선택",
-                        results['symbol'].tolist(),
-                        format_func=lambda x: f"{x} - {results[results['symbol']==x]['name'].values[0]}"
-                    )
+                if selected_symbol:
+                    selected_name = results[results['symbol']==selected_symbol]['name'].values[0]
 
-                    if selected_symbol:
-                        with st.spinner("종목 정보 로딩..."):
-                            stock_info = kr_scraper.get_stock_price(selected_symbol)
+                    with st.spinner(f"{selected_name} 분석 중..."):
+                        # 기본 정보
+                        stock_info = kr_scraper.get_stock_price(selected_symbol)
 
-                        if stock_info:
-                            col1, col2, col3, col4 = st.columns(4)
-                            col1.metric("종목명", stock_info.get('name', ''))
-                            col2.metric("현재가", f"{stock_info.get('close', 0):,}원")
-                            col3.metric("거래량", f"{stock_info.get('volume', 0):,}")
-                            col4.metric("등락률", f"{stock_info.get('change', 0):.2f}%")
+                        # 차트 데이터 (pykrx)
+                        try:
+                            from pykrx import stock as krx
+                            from datetime import datetime, timedelta
+
+                            end_date = datetime.now().strftime("%Y%m%d")
+                            start_date = (datetime.now() - timedelta(days=180)).strftime("%Y%m%d")
+
+                            ohlcv = krx.get_market_ohlcv_by_date(start_date, end_date, selected_symbol)
+
+                            if not ohlcv.empty:
+                                ohlcv = ohlcv.reset_index()
+                                ohlcv.columns = ['date', 'open', 'high', 'low', 'close', 'volume', 'value', 'change']
+
+                                # 이동평균선
+                                ohlcv['ma5'] = ohlcv['close'].rolling(window=5).mean()
+                                ohlcv['ma20'] = ohlcv['close'].rolling(window=20).mean()
+                                ohlcv['ma60'] = ohlcv['close'].rolling(window=60).mean()
+
+                                # 볼린저밴드
+                                ohlcv['bb_mid'] = ohlcv['close'].rolling(window=20).mean()
+                                ohlcv['bb_std'] = ohlcv['close'].rolling(window=20).std()
+                                ohlcv['bb_upper'] = ohlcv['bb_mid'] + (ohlcv['bb_std'] * 2)
+                                ohlcv['bb_lower'] = ohlcv['bb_mid'] - (ohlcv['bb_std'] * 2)
+
+                                # RSI 계산
+                                def calc_rsi(series, period=14):
+                                    delta = series.diff()
+                                    gain = delta.clip(lower=0).rolling(window=period).mean()
+                                    loss = (-delta.clip(upper=0)).rolling(window=period).mean()
+                                    rs = gain / loss
+                                    return 100 - (100 / (1 + rs))
+
+                                ohlcv['rsi'] = calc_rsi(ohlcv['close'])
+
+                                latest = ohlcv.iloc[-1]
+                                price = latest['close']
+                                ma5 = latest['ma5'] if pd.notna(latest['ma5']) else 0
+                                ma20 = latest['ma20'] if pd.notna(latest['ma20']) else 0
+                                ma60 = latest['ma60'] if pd.notna(latest['ma60']) else 0
+                                rsi = latest['rsi'] if pd.notna(latest['rsi']) else 50
+                                bb_upper = latest['bb_upper'] if pd.notna(latest['bb_upper']) else 0
+                                bb_lower = latest['bb_lower'] if pd.notna(latest['bb_lower']) else 0
+
+                                # 기본 정보 표시
+                                st.markdown(f"## {selected_name} ({selected_symbol})")
+
+                                if stock_info:
+                                    col1, col2, col3, col4 = st.columns(4)
+                                    col1.metric("현재가", f"{stock_info.get('close', 0):,}원", f"{stock_info.get('change', 0):+.2f}%")
+                                    col2.metric("거래량", f"{stock_info.get('volume', 0):,}")
+                                    col3.metric("시가", f"{stock_info.get('open', 0):,}원")
+                                    col4.metric("고가/저가", f"{stock_info.get('high', 0):,} / {stock_info.get('low', 0):,}")
+
+                                # ─── 매수 신호 분석 ───
+                                st.markdown("---")
+                                signals = []
+                                buy_score = 50
+
+                                # 이동평균선 분석
+                                if ma5 > 0 and ma20 > 0:
+                                    if price > ma5 > ma20:
+                                        signals.append('📈 정배열 (상승 추세)')
+                                        buy_score += 10
+                                    elif price < ma5 < ma20:
+                                        signals.append('📉 역배열 (하락 추세)')
+                                        buy_score -= 10
+                                    # 골든크로스 체크
+                                    if len(ohlcv) > 2:
+                                        prev_ma5 = ohlcv['ma5'].iloc[-2]
+                                        prev_ma20 = ohlcv['ma20'].iloc[-2]
+                                        if pd.notna(prev_ma5) and pd.notna(prev_ma20):
+                                            if ma5 > ma20 and prev_ma5 <= prev_ma20:
+                                                signals.append('🌟 골든크로스!')
+                                                buy_score += 15
+
+                                # RSI 분석
+                                if rsi < 30:
+                                    signals.append(f'💚 RSI {rsi:.0f} 과매도 (매수 기회)')
+                                    buy_score += 15
+                                elif rsi > 70:
+                                    signals.append(f'🔴 RSI {rsi:.0f} 과매수')
+                                    buy_score -= 10
+
+                                # 볼린저밴드 분석
+                                if bb_lower > 0:
+                                    if price <= bb_lower:
+                                        signals.append('💰 볼린저밴드 하단 (저점 매수 기회)')
+                                        buy_score += 10
+                                    elif price >= bb_upper:
+                                        signals.append('⚠️ 볼린저밴드 상단 (과열)')
+                                        buy_score -= 5
+
+                                # 외국인/기관 수급 체크
+                                try:
+                                    foreign_df = cached_foreign_buying(50)
+                                    inst_df = cached_institution_buying(50)
+                                    if not foreign_df.empty and selected_symbol in foreign_df['symbol'].values:
+                                        signals.append('🌍 외국인 순매수 상위')
+                                        buy_score += 10
+                                    if not inst_df.empty and selected_symbol in inst_df['symbol'].values:
+                                        signals.append('🏛️ 기관 순매수 상위')
+                                        buy_score += 10
+                                except Exception:
+                                    pass
+
+                                buy_score = max(0, min(100, buy_score))
+
+                                col1, col2 = st.columns([1, 2])
+                                with col1:
+                                    if buy_score >= 75:
+                                        rec = "🟢 적극 매수 고려"
+                                        score_color = "🟢"
+                                    elif buy_score >= 60:
+                                        rec = "🟡 매수 관망"
+                                        score_color = "🟡"
+                                    elif buy_score >= 40:
+                                        rec = "🟠 중립"
+                                        score_color = "🟠"
+                                    else:
+                                        rec = "🔴 매수 비추천"
+                                        score_color = "🔴"
+                                    st.metric("매수 점수", f"{score_color} {buy_score}점 / 100점")
+                                    st.markdown(f"### {rec}")
+
+                                with col2:
+                                    st.markdown("**📊 분석 신호:**")
+                                    if signals:
+                                        for sig in signals:
+                                            st.markdown(f"- {sig}")
+                                    else:
+                                        st.markdown("- 특별한 신호 없음")
+
+                                # 기술적 지표
+                                st.markdown("---")
+                                st.subheader("📈 기술적 지표")
+
+                                col1, col2, col3, col4, col5 = st.columns(5)
+                                col1.metric("MA5", f"{ma5:,.0f}원" if ma5 > 0 else "-")
+                                col2.metric("MA20", f"{ma20:,.0f}원" if ma20 > 0 else "-")
+                                col3.metric("MA60", f"{ma60:,.0f}원" if ma60 > 0 else "-")
+                                rsi_status = "과매수" if rsi > 70 else "과매도" if rsi < 30 else "중립"
+                                col4.metric(f"RSI ({rsi_status})", f"{rsi:.1f}")
+                                col5.metric("볼린저 위치", f"{((price - bb_lower) / (bb_upper - bb_lower) * 100):.0f}%" if bb_upper > bb_lower else "-")
+
+                                # 차트 표시
+                                st.markdown("---")
+                                st.subheader("📊 6개월 차트")
+
+                                fig = go.Figure()
+
+                                fig.add_trace(go.Candlestick(
+                                    x=ohlcv['date'],
+                                    open=ohlcv['open'], high=ohlcv['high'],
+                                    low=ohlcv['low'], close=ohlcv['close'],
+                                    name="가격"
+                                ))
+
+                                fig.add_trace(go.Scatter(x=ohlcv['date'], y=ohlcv['ma5'], name='MA5', line=dict(color='orange', width=1)))
+                                fig.add_trace(go.Scatter(x=ohlcv['date'], y=ohlcv['ma20'], name='MA20', line=dict(color='blue', width=1)))
+                                fig.add_trace(go.Scatter(x=ohlcv['date'], y=ohlcv['ma60'], name='MA60', line=dict(color='purple', width=1)))
+
+                                # 볼린저밴드
+                                fig.add_trace(go.Scatter(x=ohlcv['date'], y=ohlcv['bb_upper'], name='BB상단', line=dict(color='rgba(255,0,0,0.3)', width=1, dash='dot')))
+                                fig.add_trace(go.Scatter(x=ohlcv['date'], y=ohlcv['bb_lower'], name='BB하단', line=dict(color='rgba(0,128,0,0.3)', width=1, dash='dot'), fill='tonexty', fillcolor='rgba(173,216,230,0.1)'))
+
+                                fig.update_layout(
+                                    title=f"{selected_name} 일봉 차트",
+                                    xaxis_rangeslider_visible=False,
+                                    height=500,
+                                    yaxis_title="가격 (원)",
+                                )
+                                st.plotly_chart(fig, use_container_width=True)
+
+                                # RSI 차트
+                                st.subheader("📉 RSI 차트")
+                                fig_rsi = px.line(ohlcv.dropna(subset=['rsi']), x='date', y='rsi', title='RSI (14일)')
+                                fig_rsi.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="과매수 (70)")
+                                fig_rsi.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="과매도 (30)")
+                                fig_rsi.update_layout(height=300, yaxis_title="RSI")
+                                st.plotly_chart(fig_rsi, use_container_width=True)
+
+                            else:
+                                st.warning("차트 데이터를 가져올 수 없습니다.")
+                        except ImportError:
+                            st.error("pykrx 라이브러리가 필요합니다.")
+                        except Exception as e:
+                            st.error(f"분석 중 오류: {e}")
             else:
                 st.info("검색 결과가 없습니다.")
+        else:
+            st.info("💡 종목명(예: 삼성전자) 또는 코드(예: 005930)를 입력하세요.")
 
     with tab6:
         st.subheader("📋 DART 전자공시")
@@ -1307,7 +1492,7 @@ elif page == "🌍 해외 종목 추천":
     - ⭐ **유명 투자자** (10점): 버핏, 소로스 등 유명 투자자 보유 시 가점
     """)
 
-    tab1, tab2, tab3 = st.tabs(["🏆 종합 추천", "🆕 신규 매수", "💪 고확신 종목"])
+    tab1, tab2, tab3, tab4 = st.tabs(["🏆 종합 추천", "🆕 신규 매수", "💪 고확신 종목", "🔍 종목 검색"])
 
     with tab1:
         st.subheader("종합 추천 TOP 20")
@@ -1421,6 +1606,163 @@ elif page == "🌍 해외 종목 추천":
                     st.markdown(f"**보유 투자자**: {row['holders']}")
         else:
             st.info("현재 고확신 종목 데이터가 없습니다.")
+
+    with tab4:
+        st.subheader("🔍 미국 주식 종목 검색 및 분석")
+        st.markdown("*티커(심볼)를 입력하면 차트, 기술적 지표, 슈퍼투자자 보유 현황을 종합 분석합니다*")
+
+        us_symbol = st.text_input(
+            "티커(심볼) 입력",
+            placeholder="예: AAPL, MSFT, GOOGL, TSLA, NVDA...",
+            key="us_stock_search"
+        ).strip().upper()
+
+        if us_symbol:
+            with st.spinner(f"{us_symbol} 분석 중... (최대 30초 소요)"):
+                us_recommender = USStockRecommender()
+                analysis = us_recommender.analyze_stock(us_symbol)
+
+            if analysis.get('error'):
+                st.error(f"오류: {analysis['error']}")
+            else:
+                # 기본 정보
+                st.markdown(f"## {analysis['name']} ({analysis['symbol']})")
+
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric(
+                    "현재가",
+                    f"${analysis['current_price']:,.2f}",
+                    f"{analysis['change_pct']:+.2f}%"
+                )
+                col2.metric("시가총액", f"${analysis['market_cap']/1e9:,.1f}B" if analysis['market_cap'] > 0 else "-")
+                col3.metric("PER", f"{analysis['pe_ratio']:.1f}" if analysis['pe_ratio'] > 0 else "-")
+                col4.metric("배당률", f"{analysis['dividend_yield']:.2f}%" if analysis['dividend_yield'] > 0 else "-")
+
+                # 매수 판단
+                st.markdown("---")
+                col1, col2 = st.columns([1, 2])
+                with col1:
+                    # 점수 게이지
+                    score = analysis['buy_score']
+                    if score >= 75:
+                        score_color = "🟢"
+                    elif score >= 60:
+                        score_color = "🟡"
+                    elif score >= 40:
+                        score_color = "🟠"
+                    else:
+                        score_color = "🔴"
+                    st.metric("매수 점수", f"{score_color} {score}점 / 100점")
+                    st.markdown(f"### {analysis['recommendation']}")
+
+                with col2:
+                    st.markdown("**📊 분석 신호:**")
+                    if analysis['signals']:
+                        for sig in analysis['signals']:
+                            st.markdown(f"- {sig}")
+                    else:
+                        st.markdown("- 특별한 신호 없음")
+
+                # 기술적 지표
+                st.markdown("---")
+                st.subheader("📈 기술적 지표")
+
+                col1, col2, col3, col4, col5 = st.columns(5)
+                col1.metric("MA5", f"${analysis['ma5']:,.2f}" if analysis['ma5'] > 0 else "-")
+                col2.metric("MA20", f"${analysis['ma20']:,.2f}" if analysis['ma20'] > 0 else "-")
+                col3.metric("MA60", f"${analysis['ma60']:,.2f}" if analysis['ma60'] > 0 else "-")
+
+                rsi = analysis['rsi']
+                rsi_status = "과매수" if rsi > 70 else "과매도" if rsi < 30 else "중립"
+                col4.metric(f"RSI ({rsi_status})", f"{rsi:.1f}")
+
+                macd_status = "+" if analysis['macd_hist'] > 0 else "-"
+                col5.metric(f"MACD ({macd_status})", f"{analysis['macd']:.2f}")
+
+                col1, col2, col3 = st.columns(3)
+                col1.metric("52주 최고", f"${analysis['week_52_high']:,.2f}" if analysis['week_52_high'] > 0 else "-")
+                col2.metric("52주 최저", f"${analysis['week_52_low']:,.2f}" if analysis['week_52_low'] > 0 else "-")
+                if analysis['week_52_low'] > 0:
+                    from_low = ((analysis['current_price'] - analysis['week_52_low']) / analysis['week_52_low']) * 100
+                    col3.metric("52주 저점 대비", f"+{from_low:.1f}%")
+
+                # 차트
+                candles = analysis.get('candles', pd.DataFrame())
+                if not candles.empty:
+                    st.markdown("---")
+                    st.subheader("📊 6개월 차트")
+
+                    # 캔들 + MA 차트
+                    fig = go.Figure()
+
+                    fig.add_trace(go.Candlestick(
+                        x=candles['date'],
+                        open=candles['open'], high=candles['high'],
+                        low=candles['low'], close=candles['close'],
+                        name="가격"
+                    ))
+
+                    if 'ma5' in candles.columns:
+                        fig.add_trace(go.Scatter(
+                            x=candles['date'], y=candles['ma5'],
+                            name='MA5 (5일)', line=dict(color='orange', width=1)
+                        ))
+                    if 'ma20' in candles.columns:
+                        fig.add_trace(go.Scatter(
+                            x=candles['date'], y=candles['ma20'],
+                            name='MA20 (20일)', line=dict(color='blue', width=1)
+                        ))
+                    if 'ma60' in candles.columns:
+                        fig.add_trace(go.Scatter(
+                            x=candles['date'], y=candles['ma60'],
+                            name='MA60 (60일)', line=dict(color='purple', width=1)
+                        ))
+
+                    # 볼린저밴드
+                    if 'bb_upper' in candles.columns:
+                        fig.add_trace(go.Scatter(
+                            x=candles['date'], y=candles['bb_upper'],
+                            name='볼린저 상단', line=dict(color='rgba(255,0,0,0.3)', width=1, dash='dot')
+                        ))
+                        fig.add_trace(go.Scatter(
+                            x=candles['date'], y=candles['bb_lower'],
+                            name='볼린저 하단', line=dict(color='rgba(0,128,0,0.3)', width=1, dash='dot'),
+                            fill='tonexty', fillcolor='rgba(173,216,230,0.1)'
+                        ))
+
+                    fig.update_layout(
+                        title=f"{analysis['name']} 일봉 차트",
+                        xaxis_rangeslider_visible=False,
+                        height=500,
+                        yaxis_title="가격 ($)",
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+                # 슈퍼투자자 보유 현황
+                if analysis['super_investors']:
+                    st.markdown("---")
+                    st.subheader(f"👥 슈퍼투자자 보유 현황 ({analysis['num_super_investors']}명)")
+
+                    for inv in analysis['super_investors'][:5]:
+                        pct_str = f" — 포트폴리오의 {inv['percent']:.1f}%" if inv['percent'] > 0 else ""
+                        st.markdown(f"- **{inv['name']}** (`{inv['investor_id']}`){pct_str}")
+
+                    if analysis['num_super_investors'] > 5:
+                        st.caption(f"외 {analysis['num_super_investors'] - 5}명 더 보유")
+                else:
+                    st.info("이 종목을 보유한 슈퍼투자자가 없습니다.")
+
+        else:
+            st.info("💡 미국 주식 티커(심볼)를 입력하세요. 예: AAPL(애플), MSFT(마이크로소프트), NVDA(엔비디아)")
+
+            # 인기 종목 바로가기
+            st.markdown("**🔥 인기 종목 바로가기:**")
+            popular = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "BRK-B"]
+            cols = st.columns(4)
+            for i, sym in enumerate(popular):
+                if cols[i % 4].button(sym, key=f"pop_{sym}"):
+                    st.session_state.us_stock_search = sym
+                    st.rerun()
 
     # Disclaimer
     st.markdown("---")

@@ -353,6 +353,272 @@ class USStockRecommender:
         except (ValueError, TypeError):
             return 0.0
 
+    def analyze_stock(self, symbol: str) -> dict:
+        """
+        개별 미국 주식 종합 분석.
+        yfinance로 가격/차트 데이터 + Dataroma에서 슈퍼투자자 보유 현황.
+        """
+        try:
+            import yfinance as yf
+        except ImportError:
+            return {'error': 'yfinance 라이브러리가 설치되지 않았습니다.'}
+
+        result = {
+            'symbol': symbol.upper(),
+            'name': '',
+            'error': None,
+            # 기본 정보
+            'current_price': 0,
+            'prev_close': 0,
+            'change_pct': 0,
+            'market_cap': 0,
+            'pe_ratio': 0,
+            'forward_pe': 0,
+            'dividend_yield': 0,
+            'week_52_high': 0,
+            'week_52_low': 0,
+            # 기술적 지표
+            'ma5': 0,
+            'ma20': 0,
+            'ma60': 0,
+            'rsi': 50,
+            'macd': 0,
+            'macd_signal': 0,
+            'macd_hist': 0,
+            'bb_upper': 0,
+            'bb_lower': 0,
+            # 매수 판단
+            'signals': [],
+            'buy_score': 0,
+            'recommendation': '',
+            # 슈퍼투자자 정보
+            'super_investors': [],
+            'num_super_investors': 0,
+            # 차트 데이터
+            'candles': pd.DataFrame(),
+        }
+
+        try:
+            ticker = yf.Ticker(symbol.upper())
+            info = ticker.info
+
+            # 기본 정보
+            result['name'] = info.get('shortName', info.get('longName', symbol))
+            result['current_price'] = info.get('currentPrice', info.get('regularMarketPrice', 0)) or 0
+            result['prev_close'] = info.get('previousClose', 0) or 0
+            if result['prev_close'] > 0:
+                result['change_pct'] = ((result['current_price'] - result['prev_close']) / result['prev_close']) * 100
+            result['market_cap'] = info.get('marketCap', 0) or 0
+            result['pe_ratio'] = info.get('trailingPE', 0) or 0
+            result['forward_pe'] = info.get('forwardPE', 0) or 0
+            result['dividend_yield'] = (info.get('dividendYield', 0) or 0) * 100
+            result['week_52_high'] = info.get('fiftyTwoWeekHigh', 0) or 0
+            result['week_52_low'] = info.get('fiftyTwoWeekLow', 0) or 0
+
+            # 차트 데이터 (6개월)
+            hist = ticker.history(period='6mo')
+            if hist.empty:
+                result['error'] = '차트 데이터를 가져올 수 없습니다.'
+                return result
+
+            hist = hist.reset_index()
+            hist.columns = [c.lower() for c in hist.columns]
+
+            # 이동평균선
+            hist['ma5'] = hist['close'].rolling(window=5).mean()
+            hist['ma20'] = hist['close'].rolling(window=20).mean()
+            hist['ma60'] = hist['close'].rolling(window=60).mean()
+
+            # RSI
+            result['rsi'] = self._calculate_rsi(hist['close'])
+
+            # MACD
+            macd_data = self._calculate_macd(hist['close'])
+            result['macd'] = macd_data['macd']
+            result['macd_signal'] = macd_data['signal']
+            result['macd_hist'] = macd_data['histogram']
+            hist['macd'] = macd_data['macd_line'] if 'macd_line' in macd_data else 0
+            hist['macd_signal'] = macd_data['signal_line'] if 'signal_line' in macd_data else 0
+
+            # 볼린저밴드
+            hist['bb_mid'] = hist['close'].rolling(window=20).mean()
+            hist['bb_std'] = hist['close'].rolling(window=20).std()
+            hist['bb_upper'] = hist['bb_mid'] + (hist['bb_std'] * 2)
+            hist['bb_lower'] = hist['bb_mid'] - (hist['bb_std'] * 2)
+
+            # 최신 값
+            latest = hist.iloc[-1]
+            result['ma5'] = latest['ma5'] if pd.notna(latest['ma5']) else 0
+            result['ma20'] = latest['ma20'] if pd.notna(latest['ma20']) else 0
+            result['ma60'] = latest['ma60'] if pd.notna(latest['ma60']) else 0
+            result['bb_upper'] = latest['bb_upper'] if pd.notna(latest['bb_upper']) else 0
+            result['bb_lower'] = latest['bb_lower'] if pd.notna(latest['bb_lower']) else 0
+
+            result['candles'] = hist
+
+            # ─── 매수 신호 분석 ───
+            signals = []
+            buy_score = 50  # 기본 50점
+
+            price = result['current_price']
+
+            # 1) 이동평균선 분석
+            if result['ma5'] > 0 and result['ma20'] > 0:
+                if price > result['ma5'] > result['ma20']:
+                    signals.append('📈 정배열 (단기>중기 상승 추세)')
+                    buy_score += 10
+                elif price < result['ma5'] < result['ma20']:
+                    signals.append('📉 역배열 (하락 추세)')
+                    buy_score -= 10
+                if result['ma5'] > result['ma20'] and hist['ma5'].iloc[-2] <= hist['ma20'].iloc[-2]:
+                    signals.append('🌟 골든크로스 발생!')
+                    buy_score += 15
+
+            # 2) RSI 분석
+            rsi = result['rsi']
+            if rsi < 30:
+                signals.append(f'💚 RSI {rsi:.0f} 과매도 (매수 기회)')
+                buy_score += 15
+            elif rsi > 70:
+                signals.append(f'🔴 RSI {rsi:.0f} 과매수 (조정 가능)')
+                buy_score -= 10
+            elif 40 <= rsi <= 60:
+                signals.append(f'🟡 RSI {rsi:.0f} 중립')
+
+            # 3) MACD 분석
+            if result['macd_hist'] > 0 and macd_data.get('cross') == 'golden':
+                signals.append('🚀 MACD 골든크로스')
+                buy_score += 10
+            elif result['macd_hist'] < 0 and macd_data.get('cross') == 'dead':
+                signals.append('⚠️ MACD 데드크로스')
+                buy_score -= 10
+
+            # 4) 볼린저밴드 분석
+            if result['bb_lower'] > 0:
+                if price <= result['bb_lower']:
+                    signals.append('💰 볼린저밴드 하단 (저점 매수 기회)')
+                    buy_score += 10
+                elif price >= result['bb_upper']:
+                    signals.append('⚠️ 볼린저밴드 상단 (과열)')
+                    buy_score -= 5
+
+            # 5) 52주 고저점 분석
+            if result['week_52_low'] > 0:
+                from_52low = ((price - result['week_52_low']) / result['week_52_low']) * 100
+                from_52high = ((price - result['week_52_high']) / result['week_52_high']) * 100
+                if from_52low < 10:
+                    signals.append(f'📍 52주 저점 근처 (+{from_52low:.1f}%)')
+                    buy_score += 10
+                if from_52high > -10:
+                    signals.append(f'📍 52주 고점 근처 ({from_52high:.1f}%)')
+
+            # 6) PER 분석
+            if result['pe_ratio'] > 0:
+                if result['pe_ratio'] < 15:
+                    signals.append(f'💎 저PER ({result["pe_ratio"]:.1f})')
+                    buy_score += 5
+                elif result['pe_ratio'] > 30:
+                    signals.append(f'⚠️ 고PER ({result["pe_ratio"]:.1f})')
+                    buy_score -= 5
+
+            # ─── 슈퍼투자자 보유 현황 ───
+            try:
+                owners = self.scraper.get_stock_owners(symbol.upper())
+                if not owners.empty:
+                    result['num_super_investors'] = len(owners)
+                    # 유명 투자자 필터
+                    famous = []
+                    for _, row in owners.iterrows():
+                        inv_id = row['investor_id']
+                        if inv_id in FAMOUS_INVESTORS:
+                            kr_name, _ = FAMOUS_INVESTORS[inv_id]
+                            famous.append({
+                                'name': kr_name,
+                                'investor_id': inv_id,
+                                'percent': row.get('percent_portfolio', 0),
+                            })
+                        else:
+                            famous.append({
+                                'name': row.get('investor_name', inv_id),
+                                'investor_id': inv_id,
+                                'percent': row.get('percent_portfolio', 0),
+                            })
+                    result['super_investors'] = famous[:10]
+
+                    if result['num_super_investors'] >= 10:
+                        signals.append(f'👥 슈퍼투자자 {result["num_super_investors"]}명 보유!')
+                        buy_score += 15
+                    elif result['num_super_investors'] >= 5:
+                        signals.append(f'👥 슈퍼투자자 {result["num_super_investors"]}명 보유')
+                        buy_score += 10
+                    elif result['num_super_investors'] >= 1:
+                        signals.append(f'👤 슈퍼투자자 {result["num_super_investors"]}명 보유')
+                        buy_score += 5
+            except Exception:
+                pass
+
+            result['signals'] = signals
+            result['buy_score'] = max(0, min(100, buy_score))
+
+            # 종합 판단
+            if result['buy_score'] >= 75:
+                result['recommendation'] = '🟢 적극 매수 고려'
+            elif result['buy_score'] >= 60:
+                result['recommendation'] = '🟡 매수 관망'
+            elif result['buy_score'] >= 40:
+                result['recommendation'] = '🟠 중립 (관망)'
+            else:
+                result['recommendation'] = '🔴 매수 비추천'
+
+        except Exception as e:
+            result['error'] = str(e)
+
+        return result
+
+    def _calculate_rsi(self, closes: pd.Series, period: int = 14) -> float:
+        """RSI 계산."""
+        if len(closes) < period + 1:
+            return 50.0
+        deltas = closes.diff().dropna()
+        gains = deltas.clip(lower=0)
+        losses = (-deltas).clip(lower=0)
+        avg_gain = gains.rolling(window=period).mean().iloc[-1]
+        avg_loss = losses.rolling(window=period).mean().iloc[-1]
+        if avg_loss == 0:
+            return 100.0
+        rs = avg_gain / avg_loss
+        return 100 - (100 / (1 + rs))
+
+    def _calculate_macd(self, closes: pd.Series) -> dict:
+        """MACD 계산."""
+        if len(closes) < 26:
+            return {'macd': 0, 'signal': 0, 'histogram': 0, 'cross': 'none'}
+        ema12 = closes.ewm(span=12, adjust=False).mean()
+        ema26 = closes.ewm(span=26, adjust=False).mean()
+        macd_line = ema12 - ema26
+        signal_line = macd_line.ewm(span=9, adjust=False).mean()
+        histogram = macd_line - signal_line
+
+        current_macd = macd_line.iloc[-1]
+        current_signal = signal_line.iloc[-1]
+        prev_macd = macd_line.iloc[-2]
+        prev_signal = signal_line.iloc[-2]
+
+        cross = 'none'
+        if prev_macd <= prev_signal and current_macd > current_signal:
+            cross = 'golden'
+        elif prev_macd >= prev_signal and current_macd < current_signal:
+            cross = 'dead'
+
+        return {
+            'macd': current_macd,
+            'signal': current_signal,
+            'histogram': histogram.iloc[-1],
+            'cross': cross,
+            'macd_line': macd_line,
+            'signal_line': signal_line,
+        }
+
 
 if __name__ == "__main__":
     recommender = USStockRecommender()
