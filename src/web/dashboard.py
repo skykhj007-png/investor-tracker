@@ -1620,8 +1620,14 @@ elif page == "🌍 해외 종목 추천":
         st.subheader("🔍 미국 주식 종목 검색 및 분석")
         st.markdown("*티커(심볼)를 입력하면 차트, 기술적 지표, 슈퍼투자자 보유 현황을 종합 분석합니다*")
 
+        # 인기 종목 버튼 클릭 시 설정된 값 확인
+        default_us_symbol = st.session_state.get("_selected_us_stock", "")
+        if default_us_symbol:
+            del st.session_state["_selected_us_stock"]
+
         us_symbol = st.text_input(
             "티커(심볼) 입력",
+            value=default_us_symbol,
             placeholder="예: AAPL, MSFT, GOOGL, TSLA, NVDA...",
             key="us_stock_search"
         ).strip().upper()
@@ -1769,7 +1775,7 @@ elif page == "🌍 해외 종목 추천":
             cols = st.columns(4)
             for i, sym in enumerate(popular):
                 if cols[i % 4].button(sym, key=f"pop_{sym}"):
-                    st.session_state.us_stock_search = sym
+                    st.session_state["_selected_us_stock"] = sym
                     st.rerun()
 
     # Disclaimer
