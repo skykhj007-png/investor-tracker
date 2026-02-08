@@ -2878,6 +2878,46 @@ elif page == "🪙 현물코인":
                 if analysis['signals']:
                     st.info("**분석 신호**: " + ", ".join(analysis['signals']))
 
+                # ── 진입점 / 손절 / 목표가 ──
+                if analysis.get('entry_point', 0) > 0:
+                    st.markdown("### 🎯 진입점 / 손절라인 / 목표가")
+
+                    def _fmt_crypto_price(p, ex):
+                        if ex == "upbit":
+                            return f"{p:,.0f}원"
+                        return f"${p:,.4f}"
+
+                    ec1, ec2, ec3, ec4 = st.columns(4)
+                    ec1.metric("🎯 진입점", _fmt_crypto_price(analysis['entry_point'], ex_key4))
+                    ec2.metric("🛑 손절라인", _fmt_crypto_price(analysis['stop_loss'], ex_key4),
+                               f"{analysis['stop_loss_pct']:+.1f}%")
+
+                    _targets = analysis.get('targets', [])
+                    if len(_targets) >= 1:
+                        ec3.metric(f"📈 {_targets[0]['label']}", _fmt_crypto_price(_targets[0]['price'], ex_key4),
+                                   f"+{_targets[0]['pct']:.1f}%")
+                    if len(_targets) >= 2:
+                        ec4.metric(f"📈 {_targets[1]['label']}", _fmt_crypto_price(_targets[1]['price'], ex_key4),
+                                   f"+{_targets[1]['pct']:.1f}%")
+
+                    # 위험/보상 비율
+                    _rr = analysis.get('risk_reward_ratio', 0)
+                    _rr_emoji = "🟢 양호" if _rr >= 2 else "🟡 보통" if _rr >= 1 else "🔴 주의"
+                    st.markdown(f"**위험/보상 비율**: {_rr_emoji} ({_rr:.2f}:1) — {'높을수록 유리' if _rr < 2 else '매수 유리'}")
+
+                    # 지지선/저항선
+                    sup_col, res_col = st.columns(2)
+                    with sup_col:
+                        st.markdown("**🟢 주요 지지선**")
+                        for _lvl in analysis.get('support_levels', [])[:3]:
+                            st.markdown(f"- {_fmt_crypto_price(_lvl['price'], ex_key4)} (강도: {'●' * min(_lvl['strength'], 5)})")
+                    with res_col:
+                        st.markdown("**🔴 주요 저항선**")
+                        for _lvl in analysis.get('resistance_levels', [])[:3]:
+                            st.markdown(f"- {_fmt_crypto_price(_lvl['price'], ex_key4)} (강도: {'●' * min(_lvl['strength'], 5)})")
+
+                    st.markdown("---")
+
                 # 캔들차트 + MA + 볼린저밴드
                 candles = analysis.get('candles', pd.DataFrame())
                 if not candles.empty:
@@ -2913,8 +2953,35 @@ elif page == "🪙 현물코인":
                             fill='tonexty', fillcolor='rgba(173,216,230,0.1)'
                         ))
 
+                    # 지지/저항/진입/손절 수평선 오버레이
+                    if analysis.get('entry_point', 0) > 0:
+                        # 지지선 (초록 점선)
+                        for _sl in analysis.get('support_levels', [])[:2]:
+                            fig.add_hline(y=_sl['price'], line_dash="dash", line_color="green",
+                                          annotation_text=f"지지", annotation_position="bottom right",
+                                          line_width=1, opacity=0.6)
+                        # 저항선 (빨강 점선)
+                        for _rl in analysis.get('resistance_levels', [])[:2]:
+                            fig.add_hline(y=_rl['price'], line_dash="dash", line_color="red",
+                                          annotation_text=f"저항", annotation_position="top right",
+                                          line_width=1, opacity=0.6)
+                        # 진입점 (파랑 실선)
+                        fig.add_hline(y=analysis['entry_point'], line_dash="solid", line_color="blue",
+                                      line_width=2, opacity=0.8,
+                                      annotation_text="진입점", annotation_position="bottom left")
+                        # 손절라인 (마젠타 점선)
+                        fig.add_hline(y=analysis['stop_loss'], line_dash="dot", line_color="magenta",
+                                      line_width=2, opacity=0.8,
+                                      annotation_text="손절", annotation_position="bottom left")
+                        # 1차 목표 (골드 점선)
+                        _tgts = analysis.get('targets', [])
+                        if _tgts:
+                            fig.add_hline(y=_tgts[0]['price'], line_dash="dashdot", line_color="gold",
+                                          line_width=1.5, opacity=0.7,
+                                          annotation_text="1차 목표", annotation_position="top left")
+
                     fig.update_layout(
-                        title=f"{analysis['name']} 일봉 차트 (MA + 볼린저밴드)",
+                        title=f"{analysis['name']} 일봉 차트 (MA + 볼린저밴드 + 진입/손절)",
                         xaxis_rangeslider_visible=False,
                         height=500,
                     )
@@ -2976,6 +3043,12 @@ elif page == "🪙 현물코인":
         - **볼린저밴드 (과매수/과매도)**: 최대 15점
         - **공포탐욕지수**: 최대 15점
         - **김치프리미엄 (업비트만)**: 최대 10점
+
+        📌 **각 코인별 진입점/손절라인/목표가도 표시됩니다.**
+        - 🎯 진입점: 지지선 기반 최적 매수가
+        - 🛑 손절: 주요 지지선 하단 -3%
+        - 📈 목표가: 저항선 기반
+        - 위험/보상: 🟢 2:1 이상 = 매수 유리
         """)
 
         with st.spinner("종합 분석 중... (최대 2분 소요)"):
@@ -3011,19 +3084,42 @@ elif page == "🪙 현물코인":
                     macd_s = row.get('macd_score', 0)
                     bb_s = row.get('bb_score', 0)
                     st.markdown(f"**모멘텀**: {row['momentum_score']}점 | **거래량**: {row['volume_score']}점 | **기술적**: {row['technical_score']}점 | **MACD**: {macd_s}점 | **볼린저**: {bb_s}점")
+
+                    # 진입점 / 손절 / 목표가
+                    if row.get('entry_point', 0) > 0:
+                        st.markdown("---")
+                        e1, e2, e3, e4 = st.columns(4)
+                        if ex_key5 == "upbit":
+                            e1.metric("🎯 진입점", f"{row['entry_point']:,.0f}원")
+                            e2.metric("🛑 손절", f"{row['stop_loss']:,.0f}원", f"{row['stop_loss_pct']:+.1f}%")
+                            if row.get('target_1', 0) > 0:
+                                e3.metric("📈 1차 목표", f"{row['target_1']:,.0f}원", f"+{row['target_1_pct']:.1f}%")
+                        else:
+                            e1.metric("🎯 진입점", f"${row['entry_point']:,.4f}")
+                            e2.metric("🛑 손절", f"${row['stop_loss']:,.4f}", f"{row['stop_loss_pct']:+.1f}%")
+                            if row.get('target_1', 0) > 0:
+                                e3.metric("📈 1차 목표", f"${row['target_1']:,.4f}", f"+{row['target_1_pct']:.1f}%")
+                        _rr = row.get('risk_reward', 0)
+                        _rr_icon = "🟢" if _rr >= 2 else "🟡" if _rr >= 1 else "🔴"
+                        e4.metric("위험/보상", f"{_rr_icon} {_rr:.1f}:1")
+
                     st.markdown(f"**신호**: {row['signals']}")
 
             # 전체 테이블
             st.subheader("📊 전체 추천 목록")
-            rec_cols = ['rank', 'symbol', 'name', 'price', 'change_24h', 'score', 'rsi', 'vol_change_pct', 'signals']
-            rec_names = ['순위', '심볼', '코인명', '현재가', '24h(%)', '점수', 'RSI', '거래량변화(%)', '신호']
+            rec_cols = ['rank', 'symbol', 'name', 'price', 'change_24h', 'score',
+                         'entry_point', 'stop_loss', 'stop_loss_pct', 'target_1',
+                         'rsi', 'risk_reward', 'signals']
+            rec_names = ['순위', '심볼', '코인명', '현재가', '24h(%)', '점수',
+                          '진입점', '손절', '손절(%)', '1차목표',
+                          'RSI', '위험/보상', '신호']
 
-            if 'macd_cross' in recommendations.columns:
-                rec_cols.insert(7, 'macd_cross')
-                rec_names.insert(7, 'MACD')
+            # 컬럼이 없는 경우 안전 처리
+            available_cols = [c for c in rec_cols if c in recommendations.columns]
+            available_names = [rec_names[rec_cols.index(c)] for c in available_cols]
 
-            display_df = recommendations[rec_cols].copy()
-            display_df.columns = rec_names
+            display_df = recommendations[available_cols].copy()
+            display_df.columns = available_names
             st.dataframe(display_df, use_container_width=True, hide_index=True)
         else:
             st.warning("추천 데이터를 가져올 수 없습니다.")

@@ -205,6 +205,188 @@ class CryptoRecommender:
             'signals': signals,
         }
 
+    def _find_swing_points(self, candles_df: pd.DataFrame, window: int = 3) -> dict:
+        """스윙 포인트 탐색 (로컬 최저/최고점)."""
+        swing_highs = []
+        swing_lows = []
+
+        if candles_df.empty or len(candles_df) < window * 2 + 1:
+            return {'swing_highs': swing_highs, 'swing_lows': swing_lows}
+
+        highs = candles_df['high'].values
+        lows = candles_df['low'].values
+
+        for i in range(window, len(candles_df) - window):
+            # 로컬 최고점
+            if highs[i] == max(highs[i - window:i + window + 1]):
+                swing_highs.append(float(highs[i]))
+            # 로컬 최저점
+            if lows[i] == min(lows[i - window:i + window + 1]):
+                swing_lows.append(float(lows[i]))
+
+        return {
+            'swing_highs': sorted(swing_highs),
+            'swing_lows': sorted(swing_lows),
+        }
+
+    @staticmethod
+    def _cluster_levels(levels: list, threshold_pct: float = 0.02) -> list:
+        """근접한 가격 수준을 클러스터링 (2% 이내 병합)."""
+        if not levels:
+            return []
+
+        sorted_levels = sorted(levels)
+        clusters = []
+        current_cluster = [sorted_levels[0]]
+
+        for lvl in sorted_levels[1:]:
+            avg = sum(current_cluster) / len(current_cluster)
+            if avg > 0 and abs(lvl - avg) / avg <= threshold_pct:
+                current_cluster.append(lvl)
+            else:
+                clusters.append({
+                    'price': round(sum(current_cluster) / len(current_cluster), 4),
+                    'strength': len(current_cluster),
+                })
+                current_cluster = [lvl]
+
+        # 마지막 클러스터
+        clusters.append({
+            'price': round(sum(current_cluster) / len(current_cluster), 4),
+            'strength': len(current_cluster),
+        })
+
+        # 강도순 정렬
+        clusters.sort(key=lambda x: x['strength'], reverse=True)
+        return clusters
+
+    def get_entry_analysis(self, market: str, exchange: str = "upbit",
+                           candles_df: pd.DataFrame = None) -> dict:
+        """진입점/손절라인/지지저항 종합 분석."""
+        try:
+            # 캔들 데이터
+            if candles_df is None or candles_df.empty:
+                candles_df = self.scraper.get_candles(market, exchange, 30)
+
+            if candles_df.empty or len(candles_df) < 7:
+                return {'error': '데이터 부족'}
+
+            current_price = float(candles_df['close'].iloc[-1])
+
+            # 기존 지표 활용
+            bb = self._analyze_bollinger(candles_df)
+            tech = self._analyze_technical(candles_df)
+            rsi_val = self._calculate_rsi(candles_df)
+            swings = self._find_swing_points(candles_df, window=3)
+
+            # 지지선 후보
+            support_candidates = list(swings['swing_lows'])
+            if bb.get('lower_band', 0) > 0:
+                support_candidates.append(bb['lower_band'])
+            if tech.get('ma20', 0) > 0 and tech['ma20'] < current_price:
+                support_candidates.append(tech['ma20'])
+            day30_low = float(candles_df['low'].min())
+            support_candidates.append(day30_low)
+
+            # 저항선 후보
+            resist_candidates = list(swings['swing_highs'])
+            if bb.get('upper_band', 0) > 0:
+                resist_candidates.append(bb['upper_band'])
+            day30_high = float(candles_df['high'].max())
+            resist_candidates.append(day30_high)
+
+            # 현재가 기준 필터링
+            support_raw = [p for p in support_candidates if p < current_price * 1.01]
+            resist_raw = [p for p in resist_candidates if p > current_price * 0.99]
+
+            # 클러스터링
+            support_levels = self._cluster_levels(support_raw)
+            resistance_levels = self._cluster_levels(resist_raw)
+
+            # ── 진입점 결정 ──
+            if rsi_val < 35:
+                # 과매도: 현재가가 곧 진입점
+                entry_point = current_price
+            elif support_levels:
+                # 가장 가까운 지지선과 현재가 가중평균
+                nearest_sup = max([s['price'] for s in support_levels if s['price'] < current_price], default=current_price * 0.97)
+                entry_point = nearest_sup * 0.4 + current_price * 0.6
+            else:
+                entry_point = current_price * 0.98
+
+            entry_range = (round(entry_point * 0.99, 4), round(entry_point * 1.01, 4))
+
+            # ── 손절라인 결정 ──
+            supports_below = [s['price'] for s in support_levels if s['price'] < entry_point]
+            if supports_below:
+                strongest_below = max(supports_below)
+                stop_loss = round(strongest_below * 0.97, 4)
+            else:
+                stop_loss = round(entry_point * 0.95, 4)
+
+            # 최대 7% 제한
+            max_stop = entry_point * 0.93
+            if stop_loss < max_stop:
+                stop_loss = round(max_stop, 4)
+
+            stop_loss_pct = round((stop_loss - entry_point) / entry_point * 100, 1) if entry_point > 0 else 0
+
+            # ── 목표가 결정 ──
+            targets = []
+            resist_prices = sorted([r['price'] for r in resistance_levels if r['price'] > current_price])
+
+            if resist_prices:
+                t1 = resist_prices[0]
+                targets.append({
+                    'price': round(t1, 4),
+                    'label': '1차 목표',
+                    'pct': round((t1 - entry_point) / entry_point * 100, 1) if entry_point > 0 else 0,
+                })
+            if len(resist_prices) >= 2:
+                t2 = resist_prices[1]
+                targets.append({
+                    'price': round(t2, 4),
+                    'label': '2차 목표',
+                    'pct': round((t2 - entry_point) / entry_point * 100, 1) if entry_point > 0 else 0,
+                })
+            elif bb.get('upper_band', 0) > current_price:
+                t2 = bb['upper_band']
+                targets.append({
+                    'price': round(t2, 4),
+                    'label': '2차 목표',
+                    'pct': round((t2 - entry_point) / entry_point * 100, 1) if entry_point > 0 else 0,
+                })
+
+            # 목표가 없으면 기본값
+            if not targets:
+                t1 = current_price * 1.05
+                targets.append({
+                    'price': round(t1, 4),
+                    'label': '1차 목표',
+                    'pct': round((t1 - entry_point) / entry_point * 100, 1) if entry_point > 0 else 0,
+                })
+
+            # ── 위험/보상 비율 ──
+            risk = entry_point - stop_loss
+            reward = targets[0]['price'] - entry_point if targets else 0
+            rr_ratio = round(reward / risk, 2) if risk > 0 else 0
+            rr_ratio = min(rr_ratio, 10.0)
+
+            return {
+                'market': market,
+                'price': current_price,
+                'entry_point': round(entry_point, 4),
+                'entry_range': entry_range,
+                'stop_loss': round(stop_loss, 4),
+                'stop_loss_pct': stop_loss_pct,
+                'support_levels': support_levels[:5],
+                'resistance_levels': resistance_levels[:5],
+                'targets': targets,
+                'risk_reward_ratio': rr_ratio,
+            }
+        except Exception as e:
+            return {'error': str(e)}
+
     def _get_fear_greed_score(self) -> dict:
         """공포탐욕지수 기반 점수."""
         fg = self.scraper.get_fear_greed_index()
@@ -423,6 +605,16 @@ class CryptoRecommender:
                 if kp_data['signals']:
                     all_signals.extend(kp_data['signals'])
 
+            # 진입점 분석 (이미 가져온 candles 재사용)
+            entry_data = self.get_entry_analysis(market_id, exchange, candles_df=candles)
+            entry_point = entry_data.get('entry_point', 0)
+            stop_loss = entry_data.get('stop_loss', 0)
+            stop_loss_pct = entry_data.get('stop_loss_pct', 0)
+            targets = entry_data.get('targets', [])
+            target_1 = targets[0]['price'] if targets else 0
+            target_1_pct = targets[0]['pct'] if targets else 0
+            rr_ratio = entry_data.get('risk_reward_ratio', 0)
+
             if total > 0:
                 records.append({
                     'market': market_id,
@@ -442,6 +634,12 @@ class CryptoRecommender:
                     'macd_cross': macd_data.get('cross', 'none'),
                     'bb_position': bb_data.get('bb_position', 'unknown'),
                     'vol_change_pct': volume.get('vol_change_pct', 0),
+                    'entry_point': entry_point,
+                    'stop_loss': stop_loss,
+                    'stop_loss_pct': stop_loss_pct,
+                    'target_1': target_1,
+                    'target_1_pct': target_1_pct,
+                    'risk_reward': rr_ratio,
                     'signals': ', '.join(all_signals) if all_signals else '',
                 })
 
@@ -452,7 +650,9 @@ class CryptoRecommender:
             result = result[['rank', 'market', 'symbol', 'name', 'price', 'change_24h',
                            'score', 'momentum_score', 'volume_score', 'technical_score',
                            'macd_score', 'bb_score',
-                           'rsi', 'macd_cross', 'bb_position', 'vol_change_pct', 'signals']]
+                           'rsi', 'macd_cross', 'bb_position', 'vol_change_pct',
+                           'entry_point', 'stop_loss', 'stop_loss_pct',
+                           'target_1', 'target_1_pct', 'risk_reward', 'signals']]
 
         return result
 
@@ -534,6 +734,9 @@ class CryptoRecommender:
 
         all_signals = tech['signals'] + macd_data['signals'] + bb_data['signals']
 
+        # 진입점 분석 (이미 가져온 candles 재사용)
+        entry_data = self.get_entry_analysis(market, exchange, candles_df=candles)
+
         return {
             'market': market,
             'name': name,
@@ -551,6 +754,15 @@ class CryptoRecommender:
             'bb_position': bb_data.get('bb_position', 'unknown'),
             'signals': all_signals,
             'candles': candles,
+            # 진입점 분석
+            'entry_point': entry_data.get('entry_point', 0),
+            'entry_range': entry_data.get('entry_range', (0, 0)),
+            'stop_loss': entry_data.get('stop_loss', 0),
+            'stop_loss_pct': entry_data.get('stop_loss_pct', 0),
+            'support_levels': entry_data.get('support_levels', []),
+            'resistance_levels': entry_data.get('resistance_levels', []),
+            'targets': entry_data.get('targets', []),
+            'risk_reward_ratio': entry_data.get('risk_reward_ratio', 0),
         }
 
 
