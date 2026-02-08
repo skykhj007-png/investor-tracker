@@ -276,7 +276,7 @@ class CryptoRecommender:
             # 기존 지표 활용
             bb = self._analyze_bollinger(candles_df)
             tech = self._analyze_technical(candles_df)
-            rsi_val = self._calculate_rsi(candles_df)
+            rsi_val = self._calculate_rsi(candles_df['close'])
             swings = self._find_swing_points(candles_df, window=3)
 
             # 지지선 후보
