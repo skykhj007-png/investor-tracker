@@ -641,7 +641,11 @@ class CryptoRecommender:
                     all_signals.extend(kp_data['signals'])
 
             # 진입점 분석 (이미 가져온 candles 재사용)
-            entry_data = self.get_entry_analysis(market_id, exchange, candles_df=candles)
+            try:
+                entry_data = self.get_entry_analysis(market_id, exchange, candles_df=candles)
+            except Exception:
+                entry_data = {}
+
             entry_point = entry_data.get('entry_point', 0)
             stop_loss = entry_data.get('stop_loss', 0)
             stop_loss_pct = entry_data.get('stop_loss_pct', 0)
@@ -649,6 +653,16 @@ class CryptoRecommender:
             target_1 = targets[0]['price'] if targets else 0
             target_1_pct = targets[0]['pct'] if targets else 0
             rr_ratio = entry_data.get('risk_reward_ratio', 0)
+
+            # 폴백: get_entry_analysis 실패 시 현재가 기반 기본 계산
+            if entry_point == 0 and not candles.empty:
+                cp = float(candles['close'].iloc[-1])
+                entry_point = round(cp * 0.98, 4)
+                stop_loss = round(cp * 0.93, 4)
+                stop_loss_pct = -7.0
+                target_1 = round(cp * 1.05, 4)
+                target_1_pct = 5.0
+                rr_ratio = 1.0
 
             if total > 0:
                 records.append({
