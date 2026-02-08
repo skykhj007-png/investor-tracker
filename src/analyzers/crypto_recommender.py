@@ -265,19 +265,36 @@ class CryptoRecommender:
         """진입점/손절라인/지지저항 종합 분석."""
         try:
             # 캔들 데이터
-            if candles_df is None or candles_df.empty:
+            if candles_df is None:
                 candles_df = self.scraper.get_candles(market, exchange, 30)
 
-            if candles_df.empty or len(candles_df) < 7:
+            if candles_df is None or candles_df.empty or len(candles_df) < 7:
                 return {'error': '데이터 부족'}
 
             current_price = float(candles_df['close'].iloc[-1])
+            if current_price <= 0:
+                return {'error': '가격 데이터 오류'}
 
-            # 기존 지표 활용
-            bb = self._analyze_bollinger(candles_df)
-            tech = self._analyze_technical(candles_df)
-            rsi_val = self._calculate_rsi(candles_df['close'])
-            swings = self._find_swing_points(candles_df, window=3)
+            # 기존 지표 활용 (개별 try로 부분 실패 허용)
+            try:
+                bb = self._analyze_bollinger(candles_df)
+            except Exception:
+                bb = {'bb_score': 0, 'bb_position': 'unknown', 'upper_band': 0, 'lower_band': 0}
+
+            try:
+                tech = self._analyze_technical(candles_df)
+            except Exception:
+                tech = {'ma5': 0, 'ma20': 0, 'rsi': 50, 'technical_score': 0, 'signals': []}
+
+            try:
+                rsi_val = self._calculate_rsi(candles_df['close'])
+            except Exception:
+                rsi_val = 50
+
+            try:
+                swings = self._find_swing_points(candles_df, window=3)
+            except Exception:
+                swings = {'swing_highs': [], 'swing_lows': []}
 
             # 지지선 후보
             support_candidates = list(swings['swing_lows'])
@@ -385,6 +402,24 @@ class CryptoRecommender:
                 'risk_reward_ratio': rr_ratio,
             }
         except Exception as e:
+            # 폴백: 기본 진입점/손절 계산 (최소한의 데이터)
+            try:
+                if candles_df is not None and not candles_df.empty:
+                    cp = float(candles_df['close'].iloc[-1])
+                    return {
+                        'market': market,
+                        'price': cp,
+                        'entry_point': round(cp * 0.98, 4),
+                        'entry_range': (round(cp * 0.97, 4), round(cp * 0.99, 4)),
+                        'stop_loss': round(cp * 0.93, 4),
+                        'stop_loss_pct': -7.0,
+                        'support_levels': [{'price': round(cp * 0.95, 4), 'strength': 1}],
+                        'resistance_levels': [{'price': round(cp * 1.05, 4), 'strength': 1}],
+                        'targets': [{'price': round(cp * 1.05, 4), 'label': '1차 목표', 'pct': 5.0}],
+                        'risk_reward_ratio': 1.0,
+                    }
+            except Exception:
+                pass
             return {'error': str(e)}
 
     def _get_fear_greed_score(self) -> dict:
