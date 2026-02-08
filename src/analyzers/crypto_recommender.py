@@ -640,29 +640,65 @@ class CryptoRecommender:
                 if kp_data['signals']:
                     all_signals.extend(kp_data['signals'])
 
-            # 진입점 분석 (이미 가져온 candles 재사용)
+            # 진입점 분석 (인라인 계산 - 외부 호출 없이 직접)
+            entry_point = 0
+            stop_loss = 0
+            stop_loss_pct = 0
+            target_1 = 0
+            target_1_pct = 0
+            rr_ratio = 0
             try:
-                entry_data = self.get_entry_analysis(market_id, exchange, candles_df=candles)
+                if not candles.empty and len(candles) >= 5:
+                    closes = candles['close'].astype(float)
+                    highs = candles['high'].astype(float)
+                    lows = candles['low'].astype(float)
+                    cp = float(closes.iloc[-1])
+
+                    # 지지선 후보: 최근 저점들 + MA20
+                    low_min = float(lows.min())
+                    low_q25 = float(lows.quantile(0.25))
+                    ma20 = float(closes.tail(20).mean()) if len(closes) >= 20 else float(closes.mean())
+
+                    supports = sorted([v for v in [low_min, low_q25, ma20] if v < cp])
+
+                    # 저항선 후보: 최근 고점들
+                    high_max = float(highs.max())
+                    high_q75 = float(highs.quantile(0.75))
+                    resistances = sorted([v for v in [high_max, high_q75] if v > cp])
+
+                    # 진입점 결정
+                    rsi_val = tech.get('rsi', 50)
+                    if rsi_val < 35:
+                        entry_point = round(cp, 4)
+                    elif supports:
+                        entry_point = round(supports[-1], 4)  # 현재가에 가장 가까운 지지선
+                    else:
+                        entry_point = round(cp * 0.98, 4)
+
+                    # 손절: 진입점 -5%
+                    stop_loss = round(entry_point * 0.95, 4)
+                    stop_loss_pct = round((stop_loss - entry_point) / entry_point * 100, 1)
+
+                    # 목표가: 첫 저항선 또는 +5%
+                    if resistances:
+                        target_1 = round(resistances[0], 4)
+                    else:
+                        target_1 = round(cp * 1.05, 4)
+                    target_1_pct = round((target_1 - entry_point) / entry_point * 100, 1) if entry_point > 0 else 0
+
+                    # 위험/보상 비율
+                    risk = abs(entry_point - stop_loss)
+                    reward = abs(target_1 - entry_point)
+                    rr_ratio = round(reward / risk, 2) if risk > 0 else 0
             except Exception:
-                entry_data = {}
-
-            entry_point = entry_data.get('entry_point', 0)
-            stop_loss = entry_data.get('stop_loss', 0)
-            stop_loss_pct = entry_data.get('stop_loss_pct', 0)
-            targets = entry_data.get('targets', [])
-            target_1 = targets[0]['price'] if targets else 0
-            target_1_pct = targets[0]['pct'] if targets else 0
-            rr_ratio = entry_data.get('risk_reward_ratio', 0)
-
-            # 폴백: get_entry_analysis 실패 시 현재가 기반 기본 계산
-            if entry_point == 0 and not candles.empty:
-                cp = float(candles['close'].iloc[-1])
-                entry_point = round(cp * 0.98, 4)
-                stop_loss = round(cp * 0.93, 4)
-                stop_loss_pct = -7.0
-                target_1 = round(cp * 1.05, 4)
-                target_1_pct = 5.0
-                rr_ratio = 1.0
+                if not candles.empty:
+                    cp = float(candles['close'].iloc[-1])
+                    entry_point = round(cp * 0.98, 4)
+                    stop_loss = round(cp * 0.93, 4)
+                    stop_loss_pct = -7.0
+                    target_1 = round(cp * 1.05, 4)
+                    target_1_pct = 5.0
+                    rr_ratio = 1.0
 
             if total > 0:
                 records.append({
