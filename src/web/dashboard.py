@@ -3059,6 +3059,17 @@ elif page == "🪙 현물코인":
             recommendations = cached_crypto_recommendations(ex_key5, 20)
 
         if not recommendations.empty:
+            # 진입점/손절/목표가 0인 경우 현재가 기반 보정 (서버 호환성)
+            for idx in recommendations.index:
+                if recommendations.at[idx, 'entry_point'] == 0 and recommendations.at[idx, 'price'] > 0:
+                    p = float(recommendations.at[idx, 'price'])
+                    recommendations.at[idx, 'entry_point'] = round(p * 0.98, 2)
+                    recommendations.at[idx, 'stop_loss'] = round(p * 0.93, 2)
+                    recommendations.at[idx, 'stop_loss_pct'] = -5.0
+                    recommendations.at[idx, 'target_1'] = round(p * 1.05, 2)
+                    recommendations.at[idx, 'target_1_pct'] = 5.0
+                    recommendations.at[idx, 'risk_reward'] = 1.0
+
             # 점수 차트
             fig = px.bar(
                 recommendations.head(15),
