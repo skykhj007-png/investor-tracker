@@ -1,5 +1,6 @@
 """Korean stock recommendation analyzer based on multiple signals."""
 
+import time
 import pandas as pd
 import numpy as np
 from typing import Optional
@@ -56,6 +57,41 @@ class KoreanStockRecommender:
 
     def __init__(self):
         self.scraper = KoreanStocksScraper()
+
+    def _find_swing_points(self, ohlcv: pd.DataFrame, window: int = 5) -> dict:
+        """스윙 포인트 탐색 (로컬 최저/최고점)."""
+        swing_highs = []
+        swing_lows = []
+        if ohlcv.empty or len(ohlcv) < window * 2 + 1:
+            return {'swing_highs': swing_highs, 'swing_lows': swing_lows}
+        highs = ohlcv['고가'].values
+        lows = ohlcv['저가'].values
+        for i in range(window, len(ohlcv) - window):
+            if highs[i] == max(highs[i - window:i + window + 1]):
+                swing_highs.append(float(highs[i]))
+            if lows[i] == min(lows[i - window:i + window + 1]):
+                swing_lows.append(float(lows[i]))
+        return {'swing_highs': sorted(swing_highs), 'swing_lows': sorted(swing_lows)}
+
+    @staticmethod
+    def _cluster_levels(levels: list, threshold_pct: float = 0.02) -> list:
+        """근접 가격 수준 병합 (threshold_pct 이내 → 하나의 클러스터)."""
+        if not levels:
+            return []
+        sorted_levels = sorted(levels)
+        clusters = []
+        current_cluster = [sorted_levels[0]]
+        for price in sorted_levels[1:]:
+            if current_cluster and abs(price - current_cluster[-1]) / current_cluster[-1] <= threshold_pct:
+                current_cluster.append(price)
+            else:
+                avg_price = sum(current_cluster) / len(current_cluster)
+                clusters.append({'price': round(avg_price), 'strength': len(current_cluster)})
+                current_cluster = [price]
+        if current_cluster:
+            avg_price = sum(current_cluster) / len(current_cluster)
+            clusters.append({'price': round(avg_price), 'strength': len(current_cluster)})
+        return sorted(clusters, key=lambda x: x['strength'], reverse=True)
 
     def _calculate_rsi(self, closes: pd.Series, period: int = 14) -> float:
         """RSI 계산 (Wilder 방식)."""
@@ -385,6 +421,129 @@ class KoreanStockRecommender:
         except Exception:
             return {'market_cap': 0, 'cap_score': 0, 'cap_label': ''}
 
+    def get_entry_analysis(self, symbol: str, ohlcv: pd.DataFrame = None) -> dict:
+        """진입점/손절라인/목표가 종합 분석 (1년 OHLCV + MA + RSI + 볼린저)."""
+        try:
+            if ohlcv is None:
+                ohlcv = self.scraper.get_ohlcv_extended(symbol, years=1)
+
+            if ohlcv.empty or len(ohlcv) < 20:
+                return {'error': 'insufficient data'}
+
+            closes = ohlcv['종가']
+            highs = ohlcv['고가']
+            lows = ohlcv['저가']
+            current_price = int(closes.iloc[-1])
+            if current_price <= 0:
+                return {'error': 'invalid price'}
+
+            # 이동평균
+            ma20 = float(closes.tail(20).mean())
+            ma60 = float(closes.tail(60).mean()) if len(closes) >= 60 else float(closes.mean())
+            ma120 = float(closes.tail(120).mean()) if len(closes) >= 120 else ma60
+
+            # RSI / 볼린저
+            rsi = self._calculate_rsi(closes)
+            sma20 = closes.rolling(20).mean().iloc[-1]
+            std20 = closes.rolling(20).std().iloc[-1]
+            bb_upper = float(sma20 + 2 * std20) if std20 > 0 else current_price * 1.05
+            bb_lower = float(sma20 - 2 * std20) if std20 > 0 else current_price * 0.95
+
+            # 스윙 포인트
+            swings = self._find_swing_points(ohlcv, window=5)
+
+            # 지지선 후보
+            support_candidates = list(swings['swing_lows'])
+            if bb_lower > 0 and bb_lower < current_price:
+                support_candidates.append(bb_lower)
+            for ma_val in [ma20, ma60, ma120]:
+                if 0 < ma_val < current_price:
+                    support_candidates.append(ma_val)
+            support_candidates.append(float(lows.min()))
+
+            # 저항선 후보
+            resist_candidates = list(swings['swing_highs'])
+            if bb_upper > current_price:
+                resist_candidates.append(bb_upper)
+            resist_candidates.append(float(highs.max()))
+
+            # 현재가 기준 필터링 + 클러스터링
+            support_raw = [p for p in support_candidates if p < current_price * 1.01]
+            resist_raw = [p for p in resist_candidates if p > current_price * 0.99]
+            support_levels = self._cluster_levels(support_raw)
+            resistance_levels = self._cluster_levels(resist_raw)
+
+            # 진입점 결정
+            if rsi < 30:
+                entry_point = current_price
+            elif support_levels:
+                nearest_sup = max([s['price'] for s in support_levels if s['price'] < current_price],
+                                  default=int(current_price * 0.97))
+                entry_point = int(nearest_sup * 0.4 + current_price * 0.6)
+            else:
+                entry_point = int(current_price * 0.98)
+
+            # 손절라인
+            supports_below = [s['price'] for s in support_levels if s['price'] < entry_point]
+            if supports_below:
+                stop_loss = int(max(supports_below) * 0.97)
+            else:
+                stop_loss = int(entry_point * 0.93)
+            max_stop = int(entry_point * 0.90)
+            if stop_loss < max_stop:
+                stop_loss = max_stop
+            stop_loss_pct = round((stop_loss - entry_point) / entry_point * 100, 1)
+
+            # 목표가
+            targets = []
+            resist_prices = sorted([r['price'] for r in resistance_levels if r['price'] > current_price])
+            if resist_prices:
+                t1 = resist_prices[0]
+                targets.append({'price': int(t1), 'label': '1차 목표',
+                                'pct': round((t1 - entry_point) / entry_point * 100, 1)})
+            if len(resist_prices) >= 2:
+                t2 = resist_prices[1]
+                targets.append({'price': int(t2), 'label': '2차 목표',
+                                'pct': round((t2 - entry_point) / entry_point * 100, 1)})
+            if not targets:
+                t1 = current_price * 1.05
+                targets.append({'price': int(t1), 'label': '1차 목표',
+                                'pct': round((t1 - entry_point) / entry_point * 100, 1)})
+
+            # 위험/보상
+            risk = entry_point - stop_loss
+            reward = targets[0]['price'] - entry_point if targets else 0
+            rr_ratio = round(reward / risk, 2) if risk > 0 else 0
+            rr_ratio = min(rr_ratio, 10.0)
+
+            return {
+                'symbol': symbol, 'price': current_price,
+                'entry_point': entry_point,
+                'stop_loss': stop_loss, 'stop_loss_pct': stop_loss_pct,
+                'targets': targets, 'risk_reward_ratio': rr_ratio,
+                'support_levels': support_levels[:5],
+                'resistance_levels': resistance_levels[:5],
+                'ma20': int(ma20), 'ma60': int(ma60), 'ma120': int(ma120),
+                'rsi': rsi, 'bb_upper': int(bb_upper), 'bb_lower': int(bb_lower),
+            }
+        except Exception:
+            try:
+                if ohlcv is not None and not ohlcv.empty:
+                    cp = int(ohlcv['종가'].iloc[-1])
+                    return {
+                        'symbol': symbol, 'price': cp,
+                        'entry_point': int(cp * 0.98),
+                        'stop_loss': int(cp * 0.93), 'stop_loss_pct': -7.0,
+                        'targets': [{'price': int(cp * 1.05), 'label': '1차 목표', 'pct': 5.0}],
+                        'risk_reward_ratio': 1.0,
+                        'support_levels': [], 'resistance_levels': [],
+                        'ma20': 0, 'ma60': 0, 'ma120': 0, 'rsi': 50,
+                        'bb_upper': 0, 'bb_lower': 0,
+                    }
+            except Exception:
+                pass
+            return {'error': 'analysis failed'}
+
     def get_recommendations(self, market: str = "KOSPI", top_n: int = 20) -> pd.DataFrame:
         """
         종합 추천 종목 리스트 생성 (검증된 금융 지표 기반).
@@ -616,9 +775,45 @@ class KoreanStockRecommender:
         if not result.empty:
             result = result.sort_values('score', ascending=False).head(top_n)
             result['rank'] = range(1, len(result) + 1)
+
+            # 진입점/손절/목표가 분석 (top_n 종목만)
+            entry_points = []
+            stop_losses = []
+            stop_loss_pcts = []
+            target_1s = []
+            target_1_pcts = []
+            risk_rewards = []
+            for _, row in result.iterrows():
+                try:
+                    analysis = self.get_entry_analysis(row['symbol'])
+                    entry_points.append(analysis.get('entry_point', 0))
+                    stop_losses.append(analysis.get('stop_loss', 0))
+                    stop_loss_pcts.append(analysis.get('stop_loss_pct', 0))
+                    t = analysis.get('targets', [])
+                    target_1s.append(t[0]['price'] if t else 0)
+                    target_1_pcts.append(t[0]['pct'] if t else 0)
+                    risk_rewards.append(analysis.get('risk_reward_ratio', 0))
+                except Exception:
+                    entry_points.append(0)
+                    stop_losses.append(0)
+                    stop_loss_pcts.append(0)
+                    target_1s.append(0)
+                    target_1_pcts.append(0)
+                    risk_rewards.append(0)
+                time.sleep(0.1)
+
+            result['entry_point'] = entry_points
+            result['stop_loss'] = stop_losses
+            result['stop_loss_pct'] = stop_loss_pcts
+            result['target_1'] = target_1s
+            result['target_1_pct'] = target_1_pcts
+            result['risk_reward'] = risk_rewards
+
             result = result[['rank', 'symbol', 'name', 'score', 'signals',
                            'foreign_rank', 'foreign_억', 'inst_rank', 'inst_억',
                            'short_ratio', 'per', 'pbr', 'rsi',
+                           'entry_point', 'stop_loss', 'stop_loss_pct',
+                           'target_1', 'target_1_pct', 'risk_reward',
                            'price_change_5d', 'vol_change_pct', 'market_cap_조']]
 
         return result

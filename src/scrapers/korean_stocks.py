@@ -363,6 +363,20 @@ class KrxDataScraper:
             print(f"OHLCV 조회 오류: {e}")
             return pd.DataFrame()
 
+    def get_ohlcv_extended(self, symbol: str, years: int = 1) -> pd.DataFrame:
+        """장기 OHLCV 조회 (1~3년, 진입점/지지저항 분석용)."""
+        if not PYKRX_AVAILABLE:
+            return pd.DataFrame()
+        try:
+            trd_date = get_recent_trading_date()
+            today_dt = datetime.strptime(trd_date, "%Y%m%d")
+            start_date = (today_dt - timedelta(days=years * 365)).strftime("%Y%m%d")
+            df = krx.get_market_ohlcv_by_date(start_date, trd_date, symbol)
+            return df
+        except Exception as e:
+            print(f"Extended OHLCV 오류: {e}")
+            return pd.DataFrame()
+
     def get_accumulation_signals(self, market: str = "KOSPI", top_n: int = 20) -> pd.DataFrame:
         """주식 매집 신호 분석 - 거래량 급증 + 외국인/기관 순매수 종목.
 
@@ -805,6 +819,10 @@ class KoreanStocksScraper:
     def get_ohlcv(self, symbol: str, days: int = 40) -> pd.DataFrame:
         """개별 종목 OHLCV 조회."""
         return self.krx.get_ohlcv(symbol, days)
+
+    def get_ohlcv_extended(self, symbol: str, years: int = 1) -> pd.DataFrame:
+        """장기 OHLCV 조회 (1~3년)."""
+        return self.krx.get_ohlcv_extended(symbol, years)
 
     def get_accumulation_signals(self, market: str = "KOSPI", top_n: int = 20) -> pd.DataFrame:
         """주식 매집 신호 분석."""
