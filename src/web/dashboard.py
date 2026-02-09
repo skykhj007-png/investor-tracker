@@ -346,9 +346,12 @@ def cached_disclosures_for_stocks(stock_names_tuple, days):
 def cached_top_coins(exchange, top_n):
     return get_crypto_scraper().get_top_coins(exchange, top_n)
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=180, show_spinner=False)
 def cached_crypto_recommendations(exchange, top_n):
-    return get_crypto_recommender().get_recommendations(exchange, top_n)
+    """v3: entry/stop/target inline calculation"""
+    recommender = get_crypto_recommender()
+    result = recommender.get_recommendations(exchange, top_n)
+    return result
 
 @st.cache_data(ttl=300, show_spinner=False)
 def cached_volume_surge(exchange, top_n):
