@@ -3059,16 +3059,54 @@ elif page == "🪙 현물코인":
             recommendations = cached_crypto_recommendations(ex_key5, 20)
 
         if not recommendations.empty:
-            # 진입점/손절/목표가 0인 경우 현재가 기반 보정 (서버 호환성)
+            # 진입점/손절/목표가 0인 경우 RSI+MA20 기반 개별 보정
             for idx in recommendations.index:
                 if recommendations.at[idx, 'entry_point'] == 0 and recommendations.at[idx, 'price'] > 0:
                     p = float(recommendations.at[idx, 'price'])
-                    recommendations.at[idx, 'entry_point'] = round(p * 0.98, 2)
-                    recommendations.at[idx, 'stop_loss'] = round(p * 0.93, 2)
-                    recommendations.at[idx, 'stop_loss_pct'] = -5.0
-                    recommendations.at[idx, 'target_1'] = round(p * 1.05, 2)
-                    recommendations.at[idx, 'target_1_pct'] = 5.0
-                    recommendations.at[idx, 'risk_reward'] = 1.0
+                    rsi = float(recommendations.at[idx, 'rsi']) if 'rsi' in recommendations.columns else 50
+                    ma20 = float(recommendations.at[idx, 'ma20']) if 'ma20' in recommendations.columns and recommendations.at[idx, 'ma20'] > 0 else p
+
+                    # RSI 기반 진입점 (과매도일수록 현재가에 가깝게)
+                    if rsi < 30:
+                        entry = round(p, 2)           # 과매도: 현재가 매수
+                    elif rsi < 40:
+                        entry = round(p * 0.99, 2)    # 약세: -1%
+                    elif ma20 < p:
+                        entry = round(ma20, 2)        # MA20 지지선
+                    else:
+                        entry = round(p * 0.97, 2)    # 기본: -3%
+
+                    # RSI 기반 손절 (과매도면 타이트, 과매수면 넓게)
+                    if rsi < 30:
+                        sl_pct = 0.95   # -5%
+                    elif rsi < 50:
+                        sl_pct = 0.93   # -7%
+                    else:
+                        sl_pct = 0.90   # -10%
+                    stop = round(entry * sl_pct, 2)
+                    stop_pct = round((stop - entry) / entry * 100, 1) if entry > 0 else -5.0
+
+                    # RSI 기반 목표가 (과매도면 반등폭 크게)
+                    if rsi < 30:
+                        tgt_mult = 1.15  # +15%
+                    elif rsi < 50:
+                        tgt_mult = 1.08  # +8%
+                    else:
+                        tgt_mult = 1.05  # +5%
+                    target = round(p * tgt_mult, 2)
+                    target_pct = round((target - entry) / entry * 100, 1) if entry > 0 else 5.0
+
+                    # 위험/보상 비율
+                    risk = abs(entry - stop) if entry > 0 else 1
+                    reward = abs(target - entry) if entry > 0 else 1
+                    rr = round(reward / risk, 1) if risk > 0 else 1.0
+
+                    recommendations.at[idx, 'entry_point'] = entry
+                    recommendations.at[idx, 'stop_loss'] = stop
+                    recommendations.at[idx, 'stop_loss_pct'] = stop_pct
+                    recommendations.at[idx, 'target_1'] = target
+                    recommendations.at[idx, 'target_1_pct'] = target_pct
+                    recommendations.at[idx, 'risk_reward'] = rr
 
             # 점수 차트
             fig = px.bar(
