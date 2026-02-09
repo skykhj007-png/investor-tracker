@@ -2664,6 +2664,7 @@ elif page == "💰 연금저축":
 # Crypto page
 elif page == "🪙 현물코인":
     st.title("🪙 현물코인 시세 및 분석")
+    st.caption("📌 v3.1 - entry/stop inline calc")
 
     crypto_scraper = get_crypto_scraper()
     crypto_recommender = get_crypto_recommender()
