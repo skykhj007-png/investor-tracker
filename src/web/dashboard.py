@@ -584,7 +584,7 @@ def translate_activity(activity: str) -> str:
     return activity  # 매칭 안 되면 원문 그대로
 
 # 메뉴 목록
-MENU_ITEMS = ["🏠 홈", "📌 내 관심종목", "💼 포트폴리오", "🔍 공통 종목", "📈 변화 분석", "🌐 Grand Portfolio", "🇰🇷 국내주식", "🎯 종목 추천", "🌍 해외 종목 추천", "💰 연금저축", "🪙 현물코인"]
+MENU_ITEMS = ["🏠 홈", "📌 내 관심종목", "💼 포트폴리오", "🔍 공통 종목", "📈 변화 분석", "🌐 Grand Portfolio", "🇰🇷 국내주식", "🎯 종목 추천", "📊 진입/손절 분석", "🌍 해외 종목 추천", "💰 연금저축", "🪙 현물코인"]
 
 # 네비게이션 콜백 함수
 def navigate_to(page_name):
@@ -629,6 +629,7 @@ if page == "🏠 홈":
         ("🌐", "Grand Portfolio", "전체 통합 포트폴리오", "🌐 Grand Portfolio"),
         ("🇰🇷", "국내주식", "투자자 동향/공매도/매집", "🇰🇷 국내주식"),
         ("🎯", "종목 추천", "AI 종합 종목 추천", "🎯 종목 추천"),
+        ("📊", "진입/손절 분석", "주식 진입점·손절·목표가", "📊 진입/손절 분석"),
         ("🌍", "해외 종목 추천", "슈퍼투자자 기반 미국주식", "🌍 해외 종목 추천"),
         ("💰", "연금저축", "ETF 추천/심리분석", "💰 연금저축"),
         ("🪙", "현물코인", "업비트/바이낸스 분석", "🪙 현물코인"),
@@ -2202,6 +2203,222 @@ elif page == "🎯 종목 추천":
     # Disclaimer
     st.markdown("---")
     st.caption("⚠️ **투자 유의사항**: 이 추천은 참고용이며 투자 권유가 아닙니다. 투자 결정은 본인의 판단과 책임하에 하시기 바랍니다.")
+    st.stop()
+
+
+# ═══════════════ 진입/손절 분석 페이지 ═══════════════
+elif page == "📊 진입/손절 분석":
+    st.title("📊 진입/손절/목표가 분석")
+    st.markdown("*3년 차트 + 기술적 지표를 분석하여 매매 포인트를 산출합니다.*")
+
+    st.info("""
+    **분석 방법:**
+    - 📈 **1년 스윙 포인트**: 로컬 최저/최고점에서 지지·저항선 추출
+    - 📊 **이동평균선**: MA20, MA60, MA120을 동적 지지/저항으로 활용
+    - 📉 **볼린저밴드**: 상/하단 밴드를 추가 레벨로 참고
+    - 🔢 **RSI**: 과매도(30 이하) 시 적극 매수, 과매수(70 이상) 시 주의
+    """)
+
+    analysis_tab1, analysis_tab2 = st.tabs(["🔍 종목 검색", "🏆 추천 종목 분석"])
+
+    with analysis_tab1:
+        st.subheader("🔍 종목 직접 검색")
+
+        # 인기 종목 빠른 선택
+        st.markdown("**인기 종목 빠른 선택:**")
+        popular_kr = [
+            ("삼성전자", "005930"), ("SK하이닉스", "000660"), ("LG에너지솔루션", "373220"),
+            ("삼성바이오로직스", "207940"), ("현대차", "005380"), ("기아", "000270"),
+            ("셀트리온", "068270"), ("KB금융", "105560"), ("POSCO홀딩스", "005490"),
+            ("NAVER", "035420"), ("카카오", "035720"), ("삼성SDI", "006400"),
+        ]
+        pcols = st.columns(6)
+        for i, (name, sym) in enumerate(popular_kr):
+            if pcols[i % 6].button(name, key=f"entry_pop_{sym}", use_container_width=True):
+                st.session_state._selected_entry_stock = sym
+                st.session_state._selected_entry_name = name
+
+        # 직접 입력
+        manual_code = st.text_input("종목 코드 직접 입력 (6자리)", placeholder="005930", key="entry_manual_code")
+        if manual_code and len(manual_code) == 6:
+            st.session_state._selected_entry_stock = manual_code
+            try:
+                from pykrx import stock as krx
+                st.session_state._selected_entry_name = krx.get_market_ticker_name(manual_code)
+            except Exception:
+                st.session_state._selected_entry_name = manual_code
+
+        selected_sym = st.session_state.get('_selected_entry_stock', None)
+        selected_name = st.session_state.get('_selected_entry_name', '')
+
+        if selected_sym:
+            st.markdown(f"### 분석 대상: **{selected_name}** (`{selected_sym}`)")
+
+            with st.spinner(f"{selected_name} 3년 차트 분석 중..."):
+                ohlcv_3y = cached_kr_stock_ohlcv_3y(selected_sym)
+                recommender = get_recommender()
+                entry_data = recommender.get_entry_analysis(selected_sym, ohlcv_3y)
+
+            if 'error' not in entry_data:
+                # 핵심 메트릭
+                st.markdown("### 🎯 매매 포인트")
+                m1, m2, m3 = st.columns(3)
+                m1.metric("현재가", f"{entry_data['price']:,.0f}원")
+                rr = entry_data.get('risk_reward_ratio', 0)
+                rr_icon = "🟢" if rr >= 2 else "🟡" if rr >= 1 else "🔴"
+                m2.metric("위험/보상", f"{rr_icon} {rr:.1f}:1")
+                m3.metric("RSI", f"{entry_data.get('rsi', 0):.0f}")
+
+                e1, e2, e3, e4 = st.columns(4)
+                e1.metric("🎯 진입점", f"{entry_data['entry_point']:,.0f}원",
+                          f"{(entry_data['entry_point'] - entry_data['price']) / entry_data['price'] * 100:+.1f}%")
+                e2.metric("🛑 손절라인", f"{entry_data['stop_loss']:,.0f}원",
+                          f"{entry_data['stop_loss_pct']:+.1f}%")
+                for t in entry_data.get('targets', [])[:2]:
+                    if t == entry_data['targets'][0]:
+                        e3.metric(f"📈 {t['label']}", f"{t['price']:,.0f}원", f"+{t['pct']:.1f}%")
+                    else:
+                        e4.metric(f"📈 {t['label']}", f"{t['price']:,.0f}원", f"+{t['pct']:.1f}%")
+
+                # MA 정보
+                st.markdown(f"**MA20**: {entry_data.get('ma20', 0):,.0f}원 | "
+                            f"**MA60**: {entry_data.get('ma60', 0):,.0f}원 | "
+                            f"**MA120**: {entry_data.get('ma120', 0):,.0f}원")
+
+                # 지지/저항
+                st.markdown("---")
+                sup_col, res_col = st.columns(2)
+                with sup_col:
+                    st.markdown("### 🟢 주요 지지선")
+                    for lvl in entry_data.get('support_levels', [])[:5]:
+                        pct = (lvl['price'] - entry_data['price']) / entry_data['price'] * 100
+                        st.markdown(f"- **{lvl['price']:,.0f}원** ({pct:+.1f}%) — 강도: {'●' * min(lvl['strength'], 5)}")
+                with res_col:
+                    st.markdown("### 🔴 주요 저항선")
+                    for lvl in entry_data.get('resistance_levels', [])[:5]:
+                        pct = (lvl['price'] - entry_data['price']) / entry_data['price'] * 100
+                        st.markdown(f"- **{lvl['price']:,.0f}원** ({pct:+.1f}%) — 강도: {'●' * min(lvl['strength'], 5)}")
+
+                # 캔들차트
+                if ohlcv_3y is not None and not ohlcv_3y.empty:
+                    import plotly.graph_objects as go
+                    st.markdown("---")
+                    # 차트 기간 선택
+                    chart_period = st.radio("차트 기간", ["3개월", "6개월", "1년", "3년"],
+                                            index=1, horizontal=True, key="entry_chart_period")
+                    period_map = {"3개월": 60, "6개월": 120, "1년": 250, "3년": len(ohlcv_3y)}
+                    n_bars = period_map[chart_period]
+
+                    chart_data = ohlcv_3y.tail(n_bars).reset_index()
+                    if chart_data.columns[0] != 'date':
+                        chart_data = chart_data.rename(columns={chart_data.columns[0]: 'date'})
+
+                    fig = go.Figure()
+                    fig.add_trace(go.Candlestick(
+                        x=chart_data['date'],
+                        open=chart_data['시가'], high=chart_data['고가'],
+                        low=chart_data['저가'], close=chart_data['종가'],
+                        name="가격"
+                    ))
+                    # MA
+                    all_closes = ohlcv_3y['종가']
+                    for ma_len, color, name in [(20, 'orange', 'MA20'), (60, 'blue', 'MA60'), (120, 'purple', 'MA120')]:
+                        ma_s = all_closes.rolling(ma_len).mean().tail(n_bars)
+                        fig.add_trace(go.Scatter(x=chart_data['date'], y=ma_s.values,
+                                                name=name, line=dict(color=color, width=1)))
+
+                    # 진입/손절/목표 수평선
+                    fig.add_hline(y=entry_data['entry_point'], line_dash="dash",
+                                  line_color="green", line_width=2,
+                                  annotation_text=f"진입 {entry_data['entry_point']:,.0f}",
+                                  annotation_position="bottom left")
+                    fig.add_hline(y=entry_data['stop_loss'], line_dash="dot",
+                                  line_color="red", line_width=2,
+                                  annotation_text=f"손절 {entry_data['stop_loss']:,.0f}",
+                                  annotation_position="bottom left")
+                    for t in entry_data.get('targets', [])[:2]:
+                        fig.add_hline(y=t['price'], line_dash="dash",
+                                      line_color="gold", line_width=2,
+                                      annotation_text=f"{t['label']} {t['price']:,.0f}",
+                                      annotation_position="bottom left")
+
+                    fig.update_layout(
+                        title=f"{selected_name} ({selected_sym}) — {chart_period} 차트",
+                        xaxis_rangeslider_visible=False,
+                        height=550,
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("분석 데이터를 가져올 수 없습니다. 종목 코드를 확인해 주세요.")
+
+    with analysis_tab2:
+        st.subheader("🏆 추천 종목 진입/손절 분석")
+        st.markdown("*AI 추천 종목들의 진입점/손절/목표가를 한눈에 비교합니다.*")
+
+        with st.spinner("종합 추천 분석 중... (최대 2분)"):
+            recs_entry = cached_recommendations(top_n=15)
+
+        if not recs_entry.empty:
+            # 폴백
+            if 'entry_point' in recs_entry.columns:
+                for idx in recs_entry.index:
+                    if recs_entry.at[idx, 'entry_point'] == 0:
+                        try:
+                            sym = recs_entry.at[idx, 'symbol']
+                            price_info = get_kr_scraper().get_stock_price(sym)
+                            p = price_info.get('close', 0)
+                            if p > 0:
+                                recs_entry.at[idx, 'entry_point'] = int(p * 0.98)
+                                recs_entry.at[idx, 'stop_loss'] = int(p * 0.93)
+                                recs_entry.at[idx, 'stop_loss_pct'] = -7.0
+                                recs_entry.at[idx, 'target_1'] = int(p * 1.05)
+                                recs_entry.at[idx, 'target_1_pct'] = 5.0
+                                recs_entry.at[idx, 'risk_reward'] = 1.0
+                        except Exception:
+                            pass
+
+            # 카드 표시
+            for _, row in recs_entry.iterrows():
+                with st.expander(f"**{row['rank']}. {row['name']}** ({row['symbol']}) — 점수: {row['score']:.0f}"):
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("외국인", f"{row.get('foreign_억', '-')}억")
+                    c2.metric("기관", f"{row.get('inst_억', '-')}억")
+                    c3.metric("RSI", f"{row.get('rsi', 0):.0f}")
+                    c4.metric("PER", f"{row.get('per', 0):.1f}")
+
+                    if row.get('entry_point', 0) > 0:
+                        st.markdown("---")
+                        e1, e2, e3, e4 = st.columns(4)
+                        e1.metric("🎯 진입점", f"{row['entry_point']:,.0f}원")
+                        e2.metric("🛑 손절", f"{row['stop_loss']:,.0f}원", f"{row['stop_loss_pct']:+.1f}%")
+                        if row.get('target_1', 0) > 0:
+                            e3.metric("📈 1차 목표", f"{row['target_1']:,.0f}원", f"+{row['target_1_pct']:.1f}%")
+                        _rr = row.get('risk_reward', 0)
+                        _rr_icon = "🟢" if _rr >= 2 else "🟡" if _rr >= 1 else "🔴"
+                        e4.metric("위험/보상", f"{_rr_icon} {_rr:.1f}:1")
+
+                    st.markdown(f"**신호**: {row.get('signals', '')}")
+
+            # 테이블
+            st.markdown("---")
+            st.subheader("📊 전체 비교 테이블")
+            table_cols = ['rank', 'symbol', 'name', 'score']
+            table_names = ['순위', '코드', '종목명', '점수']
+            if 'entry_point' in recs_entry.columns:
+                table_cols.extend(['entry_point', 'stop_loss', 'stop_loss_pct', 'target_1', 'risk_reward'])
+                table_names.extend(['진입점', '손절', '손절(%)', '1차목표', 'R/R'])
+            table_cols.extend(['rsi', 'foreign_억', 'inst_억'])
+            table_names.extend(['RSI', '외국인(억)', '기관(억)'])
+            avail = [c for c in table_cols if c in recs_entry.columns]
+            avail_names = [table_names[table_cols.index(c)] for c in avail]
+            df_disp = recs_entry[avail].copy()
+            df_disp.columns = avail_names
+            st.dataframe(df_disp, use_container_width=True, hide_index=True)
+        else:
+            st.warning("추천 데이터를 가져올 수 없습니다.")
+
+    st.markdown("---")
+    st.caption("⚠️ **투자 유의사항**: 이 분석은 참고용이며 투자 권유가 아닙니다. 투자 결정은 본인의 판단과 책임하에 하시기 바랍니다.")
     st.stop()
 
 
