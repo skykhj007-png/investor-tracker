@@ -2387,44 +2387,89 @@ elif page == "📊 진입/손절 분석":
         if selected_sym:
             st.markdown(f"### 분석: **{selected_name}** (`{selected_sym}`)")
 
-            with st.spinner(f"{selected_name} 3년 차트 분석 중..."):
+            with st.spinner(f"{selected_name} 종합 분석 중..."):
                 ohlcv_3y = cached_kr_stock_ohlcv_3y(selected_sym)
                 recommender = get_recommender()
-                entry_data = recommender.get_entry_analysis(selected_sym, ohlcv_3y)
+                d = recommender.get_comprehensive_analysis(selected_sym, ohlcv_3y)
 
-            if 'error' not in entry_data:
-                # 메트릭
+            if d.get('price', 0) > 0:
+                # ── 종합 투자 의견 ──
+                op = d.get('opinion', '분석 불가')
+                op_emoji = d.get('opinion_emoji', '⚪')
+                st.markdown(f"## {op_emoji} 종합 의견: **{op}**")
+                reasons = d.get('opinion_reasons', [])
+                if reasons:
+                    st.markdown(" | ".join(reasons))
+
+                # ── 매매 포인트 ──
+                st.markdown("### 🎯 매매 포인트")
                 e1, e2, e3, e4 = st.columns(4)
-                e1.metric("🎯 진입점", f"{entry_data['entry_point']:,.0f}원",
-                          f"{(entry_data['entry_point'] - entry_data['price']) / entry_data['price'] * 100:+.1f}%")
-                e2.metric("🛑 손절", f"{entry_data['stop_loss']:,.0f}원", f"{entry_data['stop_loss_pct']:+.1f}%")
-                if entry_data.get('targets'):
-                    t = entry_data['targets'][0]
-                    e3.metric(f"📈 {t['label']}", f"{t['price']:,.0f}원", f"+{t['pct']:.1f}%")
-                rr = entry_data.get('risk_reward_ratio', 0)
+                e1.metric("🎯 진입점", f"{d.get('entry_point', 0):,.0f}원",
+                          f"{(d.get('entry_point', 0) - d['price']) / d['price'] * 100:+.1f}%" if d.get('entry_point') else "")
+                e2.metric("🛑 손절", f"{d.get('stop_loss', 0):,.0f}원", f"{d.get('stop_loss_pct', 0):+.1f}%")
+                targets = d.get('targets', [])
+                if targets:
+                    e3.metric(f"📈 {targets[0]['label']}", f"{targets[0]['price']:,.0f}원", f"+{targets[0]['pct']:.1f}%")
+                rr = d.get('risk_reward_ratio', 0)
                 rr_icon = "🟢" if rr >= 2 else "🟡" if rr >= 1 else "🔴"
                 e4.metric("위험/보상", f"{rr_icon} {rr:.1f}:1")
 
-                m1, m2, m3, m4 = st.columns(4)
-                m1.metric("현재가", f"{entry_data['price']:,.0f}원")
-                m2.metric("MA20", f"{entry_data.get('ma20', 0):,.0f}원")
-                m3.metric("MA60", f"{entry_data.get('ma60', 0):,.0f}원")
-                m4.metric("RSI", f"{entry_data.get('rsi', 0):.0f}")
+                # ── 재무 지표 ──
+                def _safe_fmt(val, fmt_str, suffix=""):
+                    try:
+                        if val and val == val:  # not None/0/NaN
+                            return f"{val:{fmt_str}}{suffix}"
+                    except (ValueError, TypeError):
+                        pass
+                    return "-"
 
-                # 지지/저항
+                st.markdown("### 📊 재무 지표")
+                f1, f2, f3, f4, f5, f6 = st.columns(6)
+                f1.metric("현재가", f"{d['price']:,.0f}원")
+                f2.metric("PER", _safe_fmt(d.get('per', 0), ",.1f"))
+                f3.metric("PBR", _safe_fmt(d.get('pbr', 0), ",.2f"))
+                f4.metric("ROE", _safe_fmt(d.get('roe', 0), ".1f", "%"))
+                f5.metric("EPS", _safe_fmt(d.get('eps', 0), ",.0f", "원"))
+                f6.metric("배당률", _safe_fmt(d.get('div_yield', 0), ".1f", "%"))
+
+                # ── 기술적 지표 ──
+                st.markdown("### 📈 기술적 지표")
+                t1, t2, t3, t4, t5 = st.columns(5)
+                t1.metric("RSI", f"{d.get('rsi', 0):.0f}")
+                t2.metric("MA20", f"{d.get('ma20', 0):,.0f}원")
+                t3.metric("MA60", f"{d.get('ma60', 0):,.0f}원")
+                t4.metric("MA120", f"{d.get('ma120', 0):,.0f}원")
+                ma_align = d.get('ma_alignment', '-')
+                macd_kr = {'golden': '골든크로스', 'dead': '데드크로스', 'bullish': '강세', 'bearish': '약세', 'none': '-'}.get(d.get('macd_cross', 'none'), '-')
+                t5.metric("MACD", macd_kr)
+
+                cap = d.get('market_cap', 0)
+                cap_label = d.get('cap_label', '')
+                if cap > 0:
+                    st.markdown(f"**시가총액**: {cap / 1e12:.1f}조원 ({cap_label}) | **이동평균**: {ma_align}")
+
+                # ── 전망 ──
+                outlook = d.get('outlook', [])
+                if outlook:
+                    st.markdown("### 🔮 전망")
+                    for ol in outlook:
+                        st.markdown(f"- {ol}")
+
+                # ── 지지/저항 ──
+                st.markdown("---")
                 sup_col, res_col = st.columns(2)
                 with sup_col:
                     st.markdown("**🟢 주요 지지선**")
-                    for lvl in entry_data.get('support_levels', [])[:4]:
-                        pct = (lvl['price'] - entry_data['price']) / entry_data['price'] * 100
+                    for lvl in d.get('support_levels', [])[:4]:
+                        pct = (lvl['price'] - d['price']) / d['price'] * 100
                         st.markdown(f"- **{lvl['price']:,.0f}원** ({pct:+.1f}%) {'●' * min(lvl['strength'], 5)}")
                 with res_col:
                     st.markdown("**🔴 주요 저항선**")
-                    for lvl in entry_data.get('resistance_levels', [])[:4]:
-                        pct = (lvl['price'] - entry_data['price']) / entry_data['price'] * 100
+                    for lvl in d.get('resistance_levels', [])[:4]:
+                        pct = (lvl['price'] - d['price']) / d['price'] * 100
                         st.markdown(f"- **{lvl['price']:,.0f}원** ({pct:+.1f}%) {'●' * min(lvl['strength'], 5)}")
 
-                # 캔들차트
+                # ── 캔들차트 ──
                 if ohlcv_3y is not None and not ohlcv_3y.empty:
                     import plotly.graph_objects as go
                     chart_period = st.radio("차트 기간", ["3개월", "6개월", "1년", "3년"],
@@ -2434,7 +2479,6 @@ elif page == "📊 진입/손절 분석":
                     chart_data = ohlcv_3y.tail(n_bars).reset_index()
                     if chart_data.columns[0] != 'date':
                         chart_data = chart_data.rename(columns={chart_data.columns[0]: 'date'})
-
                     fig = go.Figure()
                     fig.add_trace(go.Candlestick(
                         x=chart_data['date'], open=chart_data['시가'], high=chart_data['고가'],
@@ -2443,11 +2487,12 @@ elif page == "📊 진입/손절 분석":
                     for ml, clr, nm in [(20, 'orange', 'MA20'), (60, 'blue', 'MA60'), (120, 'purple', 'MA120')]:
                         ms = all_closes.rolling(ml).mean().tail(n_bars)
                         fig.add_trace(go.Scatter(x=chart_data['date'], y=ms.values, name=nm, line=dict(color=clr, width=1)))
-                    fig.add_hline(y=entry_data['entry_point'], line_dash="dash", line_color="green", line_width=2,
-                                  annotation_text=f"진입 {entry_data['entry_point']:,.0f}", annotation_position="bottom left")
-                    fig.add_hline(y=entry_data['stop_loss'], line_dash="dot", line_color="red", line_width=2,
-                                  annotation_text=f"손절 {entry_data['stop_loss']:,.0f}", annotation_position="bottom left")
-                    for t in entry_data.get('targets', [])[:2]:
+                    if d.get('entry_point', 0) > 0:
+                        fig.add_hline(y=d['entry_point'], line_dash="dash", line_color="green", line_width=2,
+                                      annotation_text=f"진입 {d['entry_point']:,.0f}", annotation_position="bottom left")
+                        fig.add_hline(y=d['stop_loss'], line_dash="dot", line_color="red", line_width=2,
+                                      annotation_text=f"손절 {d['stop_loss']:,.0f}", annotation_position="bottom left")
+                    for t in d.get('targets', [])[:2]:
                         fig.add_hline(y=t['price'], line_dash="dash", line_color="gold", line_width=2,
                                       annotation_text=f"{t['label']} {t['price']:,.0f}", annotation_position="bottom left")
                     fig.update_layout(title=f"{selected_name} — {chart_period} 차트", xaxis_rangeslider_visible=False, height=550)

@@ -544,6 +544,200 @@ class KoreanStockRecommender:
                 pass
             return {'error': 'analysis failed'}
 
+    def get_comprehensive_analysis(self, symbol: str, ohlcv: pd.DataFrame = None) -> dict:
+        """종합 투자 분석 (재무 + 기술적 + 수급 + 투자 의견)."""
+        result = {'symbol': symbol}
+        try:
+            # 1) 진입점 분석
+            entry = self.get_entry_analysis(symbol, ohlcv)
+            result.update(entry)
+
+            # 2) 재무 지표 (PER/PBR/EPS/BPS/배당)
+            try:
+                fund_df = self.scraper.get_fundamentals("KOSPI")
+                if fund_df.empty or symbol not in fund_df['symbol'].values:
+                    fund_df2 = self.scraper.get_fundamentals("KOSDAQ")
+                    if not fund_df2.empty:
+                        fund_df = fund_df2
+                if not fund_df.empty and symbol in fund_df['symbol'].values:
+                    row = fund_df[fund_df['symbol'] == symbol].iloc[0]
+                    per = float(row.get('per', 0)) if row.get('per', 0) else 0
+                    pbr = float(row.get('pbr', 0)) if row.get('pbr', 0) else 0
+                    eps = float(row.get('eps', 0)) if row.get('eps', 0) else 0
+                    bps = float(row.get('bps', 0)) if row.get('bps', 0) else 0
+                    div_yield = float(row.get('div_yield', 0)) if row.get('div_yield', 0) else 0
+                    roe = round(eps / bps * 100, 2) if bps > 0 else 0
+                    result.update({
+                        'per': per, 'pbr': pbr, 'eps': eps, 'bps': bps,
+                        'div_yield': div_yield, 'roe': roe,
+                    })
+            except Exception:
+                pass
+
+            # 3) 시가총액
+            try:
+                cap_info = self._get_market_cap_filter(symbol)
+                result['market_cap'] = cap_info.get('market_cap', 0)
+                result['cap_label'] = cap_info.get('cap_label', '')
+            except Exception:
+                pass
+
+            # 4) MACD
+            if ohlcv is not None and not ohlcv.empty and len(ohlcv) >= 26:
+                try:
+                    macd = self._calculate_macd(ohlcv['종가'])
+                    result['macd_cross'] = macd.get('cross', 'none')
+                    result['macd_hist'] = macd.get('histogram', 0)
+                except Exception:
+                    pass
+
+            # 5) 이동평균 정배열/역배열
+            ma20 = result.get('ma20', 0)
+            ma60 = result.get('ma60', 0)
+            ma120 = result.get('ma120', 0)
+            price = result.get('price', 0)
+            if price > 0 and ma20 > 0 and ma60 > 0 and ma120 > 0:
+                if price > ma20 > ma60 > ma120:
+                    result['ma_alignment'] = '정배열 (강세)'
+                elif price < ma20 < ma60 < ma120:
+                    result['ma_alignment'] = '역배열 (약세)'
+                elif price > ma20 and ma20 > ma60:
+                    result['ma_alignment'] = '단기 상승세'
+                elif price < ma20 and ma20 < ma60:
+                    result['ma_alignment'] = '단기 하락세'
+                else:
+                    result['ma_alignment'] = '횡보/혼조'
+
+            # 6) 종합 투자 의견 산출
+            score = 0
+            reasons = []
+            rsi = result.get('rsi', 50)
+            per = result.get('per', 0)
+            pbr = result.get('pbr', 0)
+            roe = result.get('roe', 0)
+            rr = result.get('risk_reward_ratio', 0)
+            macd_cross = result.get('macd_cross', 'none')
+            ma_align = result.get('ma_alignment', '')
+
+            # RSI 기반
+            if rsi < 30:
+                score += 20
+                reasons.append(f"RSI 과매도({rsi:.0f})")
+            elif rsi < 40:
+                score += 10
+                reasons.append(f"RSI 저평가권({rsi:.0f})")
+            elif rsi > 70:
+                score -= 15
+                reasons.append(f"RSI 과매수({rsi:.0f})")
+            elif rsi > 60:
+                score -= 5
+
+            # PER 기반
+            if 0 < per <= 10:
+                score += 15
+                reasons.append(f"PER 저평가({per:.1f})")
+            elif 0 < per <= 15:
+                score += 8
+            elif per > 50:
+                score -= 10
+                reasons.append(f"PER 고평가({per:.1f})")
+
+            # PBR 기반
+            if 0 < pbr <= 1.0:
+                score += 10
+                reasons.append(f"PBR 자산가치 대비 저평가({pbr:.2f})")
+            elif pbr > 5:
+                score -= 5
+
+            # ROE 기반
+            if roe > 15:
+                score += 10
+                reasons.append(f"ROE 우수({roe:.1f}%)")
+            elif roe > 10:
+                score += 5
+            elif 0 < roe < 3:
+                score -= 5
+                reasons.append(f"ROE 부진({roe:.1f}%)")
+
+            # MACD 기반
+            if macd_cross in ('golden', 'bullish'):
+                score += 10
+                reasons.append("MACD 골든크로스/강세")
+            elif macd_cross in ('dead', 'bearish'):
+                score -= 10
+                reasons.append("MACD 데드크로스/약세")
+
+            # 이동평균 정배열
+            if '정배열' in ma_align:
+                score += 10
+                reasons.append("이동평균 정배열")
+            elif '역배열' in ma_align:
+                score -= 10
+                reasons.append("이동평균 역배열")
+
+            # R:R 비율
+            if rr >= 2:
+                score += 10
+                reasons.append(f"위험/보상 유리({rr:.1f}:1)")
+            elif rr >= 1:
+                score += 5
+
+            # 배당
+            if result.get('div_yield', 0) > 3:
+                score += 5
+                reasons.append(f"높은 배당({result['div_yield']:.1f}%)")
+
+            # 의견 결정
+            if score >= 30:
+                opinion = '적극 매수'
+                opinion_emoji = '🟢🟢'
+            elif score >= 15:
+                opinion = '매수'
+                opinion_emoji = '🟢'
+            elif score >= 0:
+                opinion = '관망'
+                opinion_emoji = '🟡'
+            elif score >= -15:
+                opinion = '주의'
+                opinion_emoji = '🟠'
+            else:
+                opinion = '매도 검토'
+                opinion_emoji = '🔴'
+
+            # 전망
+            outlook = []
+            if '정배열' in ma_align and rsi < 60:
+                outlook.append("단기 상승 추세 지속 가능")
+            if '역배열' in ma_align:
+                outlook.append("추가 하락 가능성, 바닥 확인 필요")
+            if 0 < per <= 12 and roe > 10:
+                outlook.append("밸류에이션 매력적, 중장기 보유 유리")
+            if rsi < 30:
+                outlook.append("과매도 구간 반등 기대")
+            if rsi > 70:
+                outlook.append("과매수 구간 조정 가능성")
+            if macd_cross == 'golden':
+                outlook.append("MACD 골든크로스 발생, 상승 모멘텀")
+            if result.get('div_yield', 0) > 3:
+                outlook.append(f"배당수익률 {result['div_yield']:.1f}% — 배당 투자 매력")
+            if not outlook:
+                outlook.append("뚜렷한 방향성 부재, 관망 추천")
+
+            result['opinion'] = opinion
+            result['opinion_emoji'] = opinion_emoji
+            result['opinion_score'] = score
+            result['opinion_reasons'] = reasons
+            result['outlook'] = outlook
+
+        except Exception:
+            if 'opinion' not in result:
+                result['opinion'] = '분석 불가'
+                result['opinion_emoji'] = '⚪'
+                result['opinion_reasons'] = []
+                result['outlook'] = ['데이터 부족으로 분석 불가']
+
+        return result
+
     def get_recommendations(self, market: str = "KOSPI", top_n: int = 20) -> pd.DataFrame:
         """
         종합 추천 종목 리스트 생성 (검증된 금융 지표 기반).
