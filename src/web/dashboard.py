@@ -2242,15 +2242,30 @@ elif page == "📊 진입/손절 분석":
             # 카드 (기본 펼쳐진 상태)
             for _, row in recs_entry.iterrows():
                 with st.expander(f"**{row['rank']}. {row['name']}** ({row['symbol']}) — 점수: {row['score']:.0f}", expanded=(row['rank'] <= 3)):
-                    if row.get('entry_point', 0) > 0:
+                    try:
+                        _ep = float(row.get('entry_point', 0) or 0)
+                    except (ValueError, TypeError):
+                        _ep = 0
+                    if _ep > 0:
                         e1, e2, e3, e4 = st.columns(4)
-                        e1.metric("🎯 진입점", f"{row['entry_point']:,.0f}원")
-                        e2.metric("🛑 손절", f"{row['stop_loss']:,.0f}원", f"{row['stop_loss_pct']:+.1f}%")
-                        if row.get('target_1', 0) > 0:
-                            e3.metric("📈 1차 목표", f"{row['target_1']:,.0f}원", f"+{row['target_1_pct']:.1f}%")
-                        _rr = row.get('risk_reward', 0)
-                        _rr_icon = "🟢" if _rr >= 2 else "🟡" if _rr >= 1 else "🔴"
-                        e4.metric("위험/보상", f"{_rr_icon} {_rr:.1f}:1")
+                        try:
+                            e1.metric("🎯 진입점", f"{_ep:,.0f}원")
+                            e2.metric("🛑 손절", f"{float(row['stop_loss']):,.0f}원", f"{float(row['stop_loss_pct']):+.1f}%")
+                        except (ValueError, TypeError):
+                            e1.metric("🎯 진입점", "-")
+                            e2.metric("🛑 손절", "-")
+                        try:
+                            _t1 = float(row.get('target_1', 0) or 0)
+                            if _t1 > 0:
+                                e3.metric("📈 1차 목표", f"{_t1:,.0f}원", f"+{float(row['target_1_pct']):.1f}%")
+                        except (ValueError, TypeError):
+                            pass
+                        try:
+                            _rr = float(row.get('risk_reward', 0) or 0)
+                            _rr_icon = "🟢" if _rr >= 2 else "🟡" if _rr >= 1 else "🔴"
+                            e4.metric("위험/보상", f"{_rr_icon} {_rr:.1f}:1")
+                        except (ValueError, TypeError):
+                            e4.metric("위험/보상", "-")
                     c1, c2, c3, c4 = st.columns(4)
                     c1.metric("외국인", f"{row.get('foreign_억', '-')}억")
                     c2.metric("기관", f"{row.get('inst_억', '-')}억")
@@ -2334,8 +2349,14 @@ elif page == "📊 진입/손절 분석":
                         e4.metric("위험/보상", f"{_rr_icon} {_rr:.1f}:1")
                     c1, c2, c3 = st.columns(3)
                     c1.metric("현재가", fmt_p(row['price']))
-                    c2.metric("24h", f"{row['change_24h']:+.2f}%")
-                    c3.metric("RSI", f"{row['rsi']:.0f}")
+                    try:
+                        c2.metric("24h", f"{float(row.get('change_24h', 0)):+.2f}%")
+                    except (ValueError, TypeError):
+                        c2.metric("24h", "-")
+                    try:
+                        c3.metric("RSI", f"{float(row.get('rsi', 50)):.0f}")
+                    except (ValueError, TypeError):
+                        c3.metric("RSI", "-")
                     st.caption(f"신호: {row.get('signals', '')}")
 
             # 비교 테이블
@@ -2404,8 +2425,10 @@ elif page == "📊 진입/손절 분석":
                 # ── 매매 포인트 ──
                 st.markdown("### 🎯 매매 포인트")
                 e1, e2, e3, e4 = st.columns(4)
-                e1.metric("🎯 진입점", f"{d.get('entry_point', 0):,.0f}원",
-                          f"{(d.get('entry_point', 0) - d['price']) / d['price'] * 100:+.1f}%" if d.get('entry_point') else "")
+                _ep_delta = ""
+                if d.get('entry_point') and d.get('price', 0) > 0:
+                    _ep_delta = f"{(d['entry_point'] - d['price']) / d['price'] * 100:+.1f}%"
+                e1.metric("🎯 진입점", f"{d.get('entry_point', 0):,.0f}원", _ep_delta)
                 e2.metric("🛑 손절", f"{d.get('stop_loss', 0):,.0f}원", f"{d.get('stop_loss_pct', 0):+.1f}%")
                 targets = d.get('targets', [])
                 if targets:

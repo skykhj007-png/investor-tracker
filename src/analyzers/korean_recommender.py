@@ -393,6 +393,9 @@ class KoreanStockRecommender:
             cap_df = krx.get_market_cap_by_ticker(trd_date, market="KOSPI")
 
             if cap_df.empty or symbol not in cap_df.index:
+                cap_df = krx.get_market_cap_by_ticker(trd_date, market="KOSDAQ")
+
+            if cap_df.empty or symbol not in cap_df.index:
                 return {'market_cap': 0, 'cap_score': 0, 'cap_label': ''}
 
             market_cap = cap_df.loc[symbol, '시가총액']
