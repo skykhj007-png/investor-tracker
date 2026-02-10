@@ -1111,7 +1111,7 @@ elif page == "🔍 공통 종목":
             investor_ids = [investor_options[s] for s in selected_investors]
 
             with st.spinner("분석 중..."):
-                analyzer = OverlapAnalyzer(scraper=scraper)
+                analyzer = get_overlap_analyzer()
                 if use_conviction:
                     result = analyzer.calculate_conviction_score(investor_ids)
                 else:
@@ -1196,13 +1196,13 @@ elif page == "📈 변화 분석":
     with col3:
         if st.button("📥 현재 데이터 저장", help="선택한 투자자의 현재 포트폴리오를 '현재 분기'로 저장합니다"):
             with st.spinner("동기화 중..."):
-                analyzer = ChangesAnalyzer(db=db, scraper=scraper)
+                analyzer = get_changes_analyzer()
                 analyzer.sync_portfolio(investor_id, q2)
                 st.success(f"{investor_id} 포트폴리오를 {q2}로 저장했습니다.")
                 st.rerun()
 
     if st.button("🔍 분기 비교 분석", help="이전 분기와 현재 분기의 포트폴리오를 비교합니다"):
-        analyzer = ChangesAnalyzer(db=db, scraper=scraper)
+        analyzer = get_changes_analyzer()
         changes = analyzer.compare_quarters(investor_id, q1, q2)
 
         if changes.empty:
