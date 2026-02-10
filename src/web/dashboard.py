@@ -469,6 +469,7 @@ def cached_kr_stock_price(symbol):
         from datetime import datetime, timedelta
 
         # 최근 거래일 찾기
+        df = pd.DataFrame()
         for i in range(7):
             trd_date = (datetime.now() - timedelta(days=i)).strftime("%Y%m%d")
             try:
@@ -492,7 +493,7 @@ def cached_kr_stock_price(symbol):
             'high': row['고가'],
             'low': row['저가'],
             'volume': row['거래량'],
-            'change': row.get('등락률', 0),
+            'change': row.get('등락률', 0) if pd.notna(row.get('등락률')) else 0,
         }
     except Exception:
         return {}
@@ -512,7 +513,14 @@ def cached_kr_stock_ohlcv(symbol):
             return None
 
         ohlcv = ohlcv.reset_index()
-        ohlcv.columns = ['date', 'open', 'high', 'low', 'close', 'volume', 'value', 'change']
+        ohlcv = ohlcv.rename(columns={
+            ohlcv.columns[0]: 'date',
+            '시가': 'open', '고가': 'high', '저가': 'low',
+            '종가': 'close', '거래량': 'volume',
+        })
+        # 필수 컬럼 확인
+        if 'close' not in ohlcv.columns:
+            return None
 
         # 이동평균선
         ohlcv['ma5'] = ohlcv['close'].rolling(window=5).mean()
@@ -530,7 +538,7 @@ def cached_kr_stock_ohlcv(symbol):
         gain = delta.clip(lower=0).rolling(window=14).mean()
         loss = (-delta.clip(upper=0)).rolling(window=14).mean()
         rs = gain / loss
-        ohlcv['rsi'] = 100 - (100 / (1 + rs))
+        ohlcv['rsi'] = (100 - (100 / (1 + rs))).fillna(50)
 
         return ohlcv
     except Exception:
@@ -1319,7 +1327,7 @@ elif page == "🇰🇷 국내주식":
 
             if not foreign_df.empty:
                 # Format amounts
-                foreign_df['순매수(억)'] = (foreign_df['net_amount'] / 100000000).round(0).astype(int)
+                foreign_df['순매수(억)'] = (foreign_df['net_amount'] / 100000000).fillna(0).round(0).astype(int)
 
                 # Chart
                 fig = px.bar(
@@ -1345,7 +1353,7 @@ elif page == "🇰🇷 국내주식":
                 inst_df = cached_institution_buying(20)
 
             if not inst_df.empty:
-                inst_df['순매수(억)'] = (inst_df['net_amount'] / 100000000).round(0).astype(int)
+                inst_df['순매수(억)'] = (inst_df['net_amount'] / 100000000).fillna(0).round(0).astype(int)
 
                 fig = px.bar(
                     inst_df.head(15),
@@ -1377,7 +1385,7 @@ elif page == "🇰🇷 국내주식":
 
         if not cap_df.empty:
             cap_df['시총(조)'] = (cap_df['market_cap'] / 1000000000000).round(1)
-            cap_df['현재가'] = cap_df['close'].apply(lambda x: f"{x:,}")
+            cap_df['현재가'] = cap_df['close'].fillna(0).apply(lambda x: f"{int(x):,}")
 
             # Chart
             fig = px.bar(
@@ -1409,7 +1417,7 @@ elif page == "🇰🇷 국내주식":
             short_df = cached_short_volume(short_market, 30)
 
         if not short_df.empty:
-            short_df['공매도(억)'] = (short_df['short_amount'] / 100000000).round(0).astype(int)
+            short_df['공매도(억)'] = (short_df['short_amount'] / 100000000).fillna(0).round(0).astype(int)
             short_df['비중(%)'] = short_df['short_ratio'].round(2)
 
             # Chart
@@ -1474,10 +1482,15 @@ elif page == "🇰🇷 국내주식":
             for _, row in acc_signals.head(10).iterrows():
                 with st.expander(f"{row['rank']}. {row['name']} ({row['symbol']}) - 점수: {row['accumulation_score']}"):
                     col1, col2, col3, col4 = st.columns(4)
-                    col1.metric("현재가", f"{row['price']:,}원")
-                    col2.metric("5일 변화", f"{row['price_change_5d']:+.1f}%")
-                    col3.metric("거래량 변화", f"{row['vol_change_pct']:+.1f}%")
-                    col4.metric("시가총액", f"{row['market_cap_조']}조")
+                    try:
+                        col1.metric("현재가", f"{int(row.get('price', 0) or 0):,}원")
+                        col2.metric("5일 변화", f"{float(row.get('price_change_5d', 0) or 0):+.1f}%")
+                        col3.metric("거래량 변화", f"{float(row.get('vol_change_pct', 0) or 0):+.1f}%")
+                    except (ValueError, TypeError):
+                        col1.metric("현재가", "-")
+                        col2.metric("5일 변화", "-")
+                        col3.metric("거래량 변화", "-")
+                    col4.metric("시가총액", f"{row.get('market_cap_조', '-')}조")
 
                     st.markdown(f"**신호**: {row['signals']}")
 
@@ -1510,12 +1523,17 @@ elif page == "🇰🇷 국내주식":
             st.success(f"✅ 강력 매수 후보 {len(strong_candidates['strong_picks'])}개 발견!")
 
             for i, pick in enumerate(strong_candidates['strong_picks'], 1):
+                try:
+                    _p = int(pick.get('price', 0) or 0)
+                    _ch = float(pick.get('price_change_5d', 0) or 0)
+                except (ValueError, TypeError):
+                    _p, _ch = 0, 0
                 st.markdown(f"""
                 **{i}. {pick['name']}** (`{pick['symbol']}`)
-                - 현재가: {pick['price']:,}원 | 5일 변화: {pick['price_change_5d']:+.1f}%
-                - 수급 점수: {pick['rec_score']} | 매집 점수: {pick['acc_score']}
-                - 수급 신호: {pick['rec_signals']}
-                - 매집 신호: {pick['acc_signals']}
+                - 현재가: {_p:,}원 | 5일 변화: {_ch:+.1f}%
+                - 수급 점수: {pick.get('rec_score', '-')} | 매집 점수: {pick.get('acc_score', '-')}
+                - 수급 신호: {pick.get('rec_signals', '')}
+                - 매집 신호: {pick.get('acc_signals', '')}
                 """)
         else:
             st.info("현재 수급과 매집 신호를 동시에 만족하는 종목이 없습니다.")
@@ -1609,118 +1627,118 @@ elif page == "🇰🇷 국내주식":
                                     buy_score -= 10
                                 # 골든크로스 체크
                                 if len(ohlcv) > 2:
-                                        prev_ma5 = ohlcv['ma5'].iloc[-2]
-                                        prev_ma20 = ohlcv['ma20'].iloc[-2]
-                                        if pd.notna(prev_ma5) and pd.notna(prev_ma20):
-                                            if ma5 > ma20 and prev_ma5 <= prev_ma20:
-                                                signals.append('🌟 골든크로스!')
-                                                buy_score += 15
+                                    prev_ma5 = ohlcv['ma5'].iloc[-2]
+                                    prev_ma20 = ohlcv['ma20'].iloc[-2]
+                                    if pd.notna(prev_ma5) and pd.notna(prev_ma20):
+                                        if ma5 > ma20 and prev_ma5 <= prev_ma20:
+                                            signals.append('🌟 골든크로스!')
+                                            buy_score += 15
 
-                                # RSI 분석
-                                if rsi < 30:
-                                    signals.append(f'💚 RSI {rsi:.0f} 과매도 (매수 기회)')
-                                    buy_score += 15
-                                elif rsi > 70:
-                                    signals.append(f'🔴 RSI {rsi:.0f} 과매수')
-                                    buy_score -= 10
+                            # RSI 분석
+                            if rsi < 30:
+                                signals.append(f'💚 RSI {rsi:.0f} 과매도 (매수 기회)')
+                                buy_score += 15
+                            elif rsi > 70:
+                                signals.append(f'🔴 RSI {rsi:.0f} 과매수')
+                                buy_score -= 10
 
-                                # 볼린저밴드 분석
-                                if bb_lower > 0:
-                                    if price <= bb_lower:
-                                        signals.append('💰 볼린저밴드 하단 (저점 매수 기회)')
-                                        buy_score += 10
-                                    elif price >= bb_upper:
-                                        signals.append('⚠️ 볼린저밴드 상단 (과열)')
-                                        buy_score -= 5
+                            # 볼린저밴드 분석
+                            if bb_lower > 0:
+                                if price <= bb_lower:
+                                    signals.append('💰 볼린저밴드 하단 (저점 매수 기회)')
+                                    buy_score += 10
+                                elif price >= bb_upper:
+                                    signals.append('⚠️ 볼린저밴드 상단 (과열)')
+                                    buy_score -= 5
 
-                                # 외국인/기관 수급 체크
-                                try:
-                                    foreign_df = cached_foreign_buying(50)
-                                    inst_df = cached_institution_buying(50)
-                                    if not foreign_df.empty and selected_symbol in foreign_df['symbol'].values:
-                                        signals.append('🌍 외국인 순매수 상위')
-                                        buy_score += 10
-                                    if not inst_df.empty and selected_symbol in inst_df['symbol'].values:
-                                        signals.append('🏛️ 기관 순매수 상위')
-                                        buy_score += 10
-                                except Exception:
-                                    pass
+                            # 외국인/기관 수급 체크
+                            try:
+                                foreign_df = cached_foreign_buying(50)
+                                inst_df = cached_institution_buying(50)
+                                if not foreign_df.empty and selected_symbol in foreign_df['symbol'].values:
+                                    signals.append('🌍 외국인 순매수 상위')
+                                    buy_score += 10
+                                if not inst_df.empty and selected_symbol in inst_df['symbol'].values:
+                                    signals.append('🏛️ 기관 순매수 상위')
+                                    buy_score += 10
+                            except Exception:
+                                pass
 
-                                buy_score = max(0, min(100, buy_score))
+                            buy_score = max(0, min(100, buy_score))
 
-                                col1, col2 = st.columns([1, 2])
-                                with col1:
-                                    if buy_score >= 75:
-                                        rec = "🟢 적극 매수 고려"
-                                        score_color = "🟢"
-                                    elif buy_score >= 60:
-                                        rec = "🟡 매수 관망"
-                                        score_color = "🟡"
-                                    elif buy_score >= 40:
-                                        rec = "🟠 중립"
-                                        score_color = "🟠"
-                                    else:
-                                        rec = "🔴 매수 비추천"
-                                        score_color = "🔴"
-                                    st.metric("매수 점수", f"{score_color} {buy_score}점 / 100점")
-                                    st.markdown(f"### {rec}")
+                            col1, col2 = st.columns([1, 2])
+                            with col1:
+                                if buy_score >= 75:
+                                    rec = "🟢 적극 매수 고려"
+                                    score_color = "🟢"
+                                elif buy_score >= 60:
+                                    rec = "🟡 매수 관망"
+                                    score_color = "🟡"
+                                elif buy_score >= 40:
+                                    rec = "🟠 중립"
+                                    score_color = "🟠"
+                                else:
+                                    rec = "🔴 매수 비추천"
+                                    score_color = "🔴"
+                                st.metric("매수 점수", f"{score_color} {buy_score}점 / 100점")
+                                st.markdown(f"### {rec}")
 
-                                with col2:
-                                    st.markdown("**📊 분석 신호:**")
-                                    if signals:
-                                        for sig in signals:
-                                            st.markdown(f"- {sig}")
-                                    else:
-                                        st.markdown("- 특별한 신호 없음")
+                            with col2:
+                                st.markdown("**📊 분석 신호:**")
+                                if signals:
+                                    for sig in signals:
+                                        st.markdown(f"- {sig}")
+                                else:
+                                    st.markdown("- 특별한 신호 없음")
 
-                                # 기술적 지표
-                                st.markdown("---")
-                                st.subheader("📈 기술적 지표")
+                            # 기술적 지표
+                            st.markdown("---")
+                            st.subheader("📈 기술적 지표")
 
-                                col1, col2, col3, col4, col5 = st.columns(5)
-                                col1.metric("MA5", f"{ma5:,.0f}원" if ma5 > 0 else "-")
-                                col2.metric("MA20", f"{ma20:,.0f}원" if ma20 > 0 else "-")
-                                col3.metric("MA60", f"{ma60:,.0f}원" if ma60 > 0 else "-")
-                                rsi_status = "과매수" if rsi > 70 else "과매도" if rsi < 30 else "중립"
-                                col4.metric(f"RSI ({rsi_status})", f"{rsi:.1f}")
-                                col5.metric("볼린저 위치", f"{((price - bb_lower) / (bb_upper - bb_lower) * 100):.0f}%" if bb_upper > bb_lower else "-")
+                            col1, col2, col3, col4, col5 = st.columns(5)
+                            col1.metric("MA5", f"{ma5:,.0f}원" if ma5 > 0 else "-")
+                            col2.metric("MA20", f"{ma20:,.0f}원" if ma20 > 0 else "-")
+                            col3.metric("MA60", f"{ma60:,.0f}원" if ma60 > 0 else "-")
+                            rsi_status = "과매수" if rsi > 70 else "과매도" if rsi < 30 else "중립"
+                            col4.metric(f"RSI ({rsi_status})", f"{rsi:.1f}")
+                            col5.metric("볼린저 위치", f"{((price - bb_lower) / (bb_upper - bb_lower) * 100):.0f}%" if bb_upper > bb_lower else "-")
 
-                                # 차트 표시
-                                st.markdown("---")
-                                st.subheader("📊 6개월 차트")
+                            # 차트 표시
+                            st.markdown("---")
+                            st.subheader("📊 6개월 차트")
 
-                                fig = go.Figure()
+                            fig = go.Figure()
 
-                                fig.add_trace(go.Candlestick(
-                                    x=ohlcv['date'],
-                                    open=ohlcv['open'], high=ohlcv['high'],
-                                    low=ohlcv['low'], close=ohlcv['close'],
-                                    name="가격"
-                                ))
+                            fig.add_trace(go.Candlestick(
+                                x=ohlcv['date'],
+                                open=ohlcv['open'], high=ohlcv['high'],
+                                low=ohlcv['low'], close=ohlcv['close'],
+                                name="가격"
+                            ))
 
-                                fig.add_trace(go.Scatter(x=ohlcv['date'], y=ohlcv['ma5'], name='MA5', line=dict(color='orange', width=1)))
-                                fig.add_trace(go.Scatter(x=ohlcv['date'], y=ohlcv['ma20'], name='MA20', line=dict(color='blue', width=1)))
-                                fig.add_trace(go.Scatter(x=ohlcv['date'], y=ohlcv['ma60'], name='MA60', line=dict(color='purple', width=1)))
+                            fig.add_trace(go.Scatter(x=ohlcv['date'], y=ohlcv['ma5'], name='MA5', line=dict(color='orange', width=1)))
+                            fig.add_trace(go.Scatter(x=ohlcv['date'], y=ohlcv['ma20'], name='MA20', line=dict(color='blue', width=1)))
+                            fig.add_trace(go.Scatter(x=ohlcv['date'], y=ohlcv['ma60'], name='MA60', line=dict(color='purple', width=1)))
 
-                                # 볼린저밴드
-                                fig.add_trace(go.Scatter(x=ohlcv['date'], y=ohlcv['bb_upper'], name='BB상단', line=dict(color='rgba(255,0,0,0.3)', width=1, dash='dot')))
-                                fig.add_trace(go.Scatter(x=ohlcv['date'], y=ohlcv['bb_lower'], name='BB하단', line=dict(color='rgba(0,128,0,0.3)', width=1, dash='dot'), fill='tonexty', fillcolor='rgba(173,216,230,0.1)'))
+                            # 볼린저밴드
+                            fig.add_trace(go.Scatter(x=ohlcv['date'], y=ohlcv['bb_upper'], name='BB상단', line=dict(color='rgba(255,0,0,0.3)', width=1, dash='dot')))
+                            fig.add_trace(go.Scatter(x=ohlcv['date'], y=ohlcv['bb_lower'], name='BB하단', line=dict(color='rgba(0,128,0,0.3)', width=1, dash='dot'), fill='tonexty', fillcolor='rgba(173,216,230,0.1)'))
 
-                                fig.update_layout(
-                                    title=f"{selected_name} 일봉 차트",
-                                    xaxis_rangeslider_visible=False,
-                                    height=500,
-                                    yaxis_title="가격 (원)",
-                                )
-                                st.plotly_chart(fig, use_container_width=True)
+                            fig.update_layout(
+                                title=f"{selected_name} 일봉 차트",
+                                xaxis_rangeslider_visible=False,
+                                height=500,
+                                yaxis_title="가격 (원)",
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
 
-                                # RSI 차트
-                                st.subheader("📉 RSI 차트")
-                                fig_rsi = px.line(ohlcv.dropna(subset=['rsi']), x='date', y='rsi', title='RSI (14일)')
-                                fig_rsi.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="과매수 (70)")
-                                fig_rsi.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="과매도 (30)")
-                                fig_rsi.update_layout(height=300, yaxis_title="RSI")
-                                st.plotly_chart(fig_rsi, use_container_width=True)
+                            # RSI 차트
+                            st.subheader("📉 RSI 차트")
+                            fig_rsi = px.line(ohlcv.dropna(subset=['rsi']), x='date', y='rsi', title='RSI (14일)')
+                            fig_rsi.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="과매수 (70)")
+                            fig_rsi.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="과매도 (30)")
+                            fig_rsi.update_layout(height=300, yaxis_title="RSI")
+                            st.plotly_chart(fig_rsi, use_container_width=True)
 
                         else:
                             st.warning("차트 데이터를 가져올 수 없습니다.")
@@ -2964,9 +2982,14 @@ elif page == "💰 연금저축":
             for _, row in accumulation_data.head(10).iterrows():
                 with st.expander(f"{row['rank']}. {row['name']} - 점수: {row['accumulation_score']}"):
                     col1, col2, col3 = st.columns(3)
-                    col1.metric("현재가", f"{row['price']:,}원")
-                    col2.metric("5일 가격변화", f"{row['price_change_5d']:+.1f}%")
-                    col3.metric("거래량 변화", f"{row['vol_change_pct']:+.1f}%")
+                    try:
+                        col1.metric("현재가", f"{int(row.get('price', 0) or 0):,}원")
+                        col2.metric("5일 가격변화", f"{float(row.get('price_change_5d', 0) or 0):+.1f}%")
+                        col3.metric("거래량 변화", f"{float(row.get('vol_change_pct', 0) or 0):+.1f}%")
+                    except (ValueError, TypeError):
+                        col1.metric("현재가", "-")
+                        col2.metric("5일 가격변화", "-")
+                        col3.metric("거래량 변화", "-")
 
                     st.markdown(f"**신호**: {row['signals']}")
                     st.markdown(f"**자산군**: {row['asset_class']}")
@@ -2992,10 +3015,15 @@ elif page == "💰 연금저축":
             st.success(f"✅ 강력 추천 종목 {len(buy_recs['strong_picks'])}개 발견!")
 
             for i, pick in enumerate(buy_recs['strong_picks'], 1):
+                try:
+                    _p = int(pick.get('price', 0) or 0)
+                    _r = float(pick.get('return_1m', 0) or 0)
+                except (ValueError, TypeError):
+                    _p, _r = 0, 0
                 st.markdown(f"""
                 **{i}. {pick['name']}** (`{pick['symbol']}`)
-                - 현재가: {pick['price']:,}원 | 1개월 수익률: {pick['return_1m']:+.1f}%
-                - 매집점수: {pick['accumulation_score']} | 신호: {pick['signals']}
+                - 현재가: {_p:,}원 | 1개월 수익률: {_r:+.1f}%
+                - 매집점수: {pick.get('accumulation_score', '-')} | 신호: {pick.get('signals', '')}
                 """)
         else:
             st.info("현재 수익률과 매집 신호를 동시에 만족하는 종목이 없습니다.")
@@ -3189,18 +3217,19 @@ elif page == "🪙 현물코인":
             first = top_coins.iloc[0]
             second = top_coins.iloc[1] if len(top_coins) > 1 else first
 
-            if ex_key == "upbit":
-                col1.metric(first['name'], f"{first['price']:,.0f}원", f"{first['change_rate']:+.2f}%")
-                col2.metric(second['name'], f"{second['price']:,.0f}원", f"{second['change_rate']:+.2f}%")
-                col3.metric("상위 코인 수", f"{len(top_coins)}개")
-                avg_change = top_coins['change_rate'].mean()
-                col4.metric("평균 변동률", f"{avg_change:+.2f}%")
-            else:
-                col1.metric(first['name'], f"${first['price']:,.2f}", f"{first['change_rate']:+.2f}%")
-                col2.metric(second['name'], f"${second['price']:,.2f}", f"{second['change_rate']:+.2f}%")
-                col3.metric("상위 코인 수", f"{len(top_coins)}개")
-                avg_change = top_coins['change_rate'].mean()
-                col4.metric("평균 변동률", f"{avg_change:+.2f}%")
+            try:
+                if ex_key == "upbit":
+                    col1.metric(first['name'], f"{float(first['price']):,.0f}원", f"{float(first.get('change_rate', 0)):+.2f}%")
+                    col2.metric(second['name'], f"{float(second['price']):,.0f}원", f"{float(second.get('change_rate', 0)):+.2f}%")
+                else:
+                    col1.metric(first['name'], f"${float(first['price']):,.2f}", f"{float(first.get('change_rate', 0)):+.2f}%")
+                    col2.metric(second['name'], f"${float(second['price']):,.2f}", f"{float(second.get('change_rate', 0)):+.2f}%")
+            except (ValueError, TypeError, KeyError):
+                col1.metric("1위", "-")
+                col2.metric("2위", "-")
+            col3.metric("상위 코인 수", f"{len(top_coins)}개")
+            avg_change = top_coins['change_rate'].mean()
+            col4.metric("평균 변동률", f"{avg_change:+.2f}%" if pd.notna(avg_change) else "-")
 
             # 차트
             fig = px.bar(
@@ -3255,8 +3284,11 @@ elif page == "🪙 현물코인":
                 st.plotly_chart(fig, use_container_width=True)
 
                 for _, row in gainers.iterrows():
-                    price_str = f"{row['price']:,.0f}원" if ex_key2 == "upbit" else f"${row['price']:,.4f}"
-                    st.markdown(f"**{row['name']}** | {price_str} | {row['change_rate']:+.2f}%")
+                    try:
+                        price_str = f"{float(row['price']):,.0f}원" if ex_key2 == "upbit" else f"${float(row['price']):,.4f}"
+                        st.markdown(f"**{row['name']}** | {price_str} | {float(row.get('change_rate', 0)):+.2f}%")
+                    except (ValueError, TypeError):
+                        st.markdown(f"**{row.get('name', '-')}** | - | -")
             else:
                 st.info("데이터 없음")
 
@@ -3276,8 +3308,11 @@ elif page == "🪙 현물코인":
                 st.plotly_chart(fig, use_container_width=True)
 
                 for _, row in losers.iterrows():
-                    price_str = f"{row['price']:,.0f}원" if ex_key2 == "upbit" else f"${row['price']:,.4f}"
-                    st.markdown(f"**{row['name']}** | {price_str} | {row['change_rate']:+.2f}%")
+                    try:
+                        price_str = f"{float(row['price']):,.0f}원" if ex_key2 == "upbit" else f"${float(row['price']):,.4f}"
+                        st.markdown(f"**{row['name']}** | {price_str} | {float(row.get('change_rate', 0)):+.2f}%")
+                    except (ValueError, TypeError):
+                        st.markdown(f"**{row.get('name', '-')}** | - | -")
             else:
                 st.info("데이터 없음")
 
@@ -3304,12 +3339,21 @@ elif page == "🪙 현물코인":
             st.plotly_chart(fig, use_container_width=True)
 
             for _, row in vol_surge.iterrows():
-                with st.expander(f"{row['rank']}. {row['name']} ({row['symbol']}) - 거래량 {row['vol_change_pct']:+.0f}%"):
+                try:
+                    _vc = float(row.get('vol_change_pct', 0) or 0)
+                except (ValueError, TypeError):
+                    _vc = 0
+                with st.expander(f"{row['rank']}. {row['name']} ({row['symbol']}) - 거래량 {_vc:+.0f}%"):
                     col1, col2, col3 = st.columns(3)
-                    price_str = f"{row['price']:,.0f}원" if ex_key3 == "upbit" else f"${row['price']:,.4f}"
-                    col1.metric("현재가", price_str)
-                    col2.metric("24h 변동", f"{row['change_24h']:+.2f}%")
-                    col3.metric("거래량 변화", f"{row['vol_change_pct']:+.0f}%")
+                    try:
+                        price_str = f"{float(row['price']):,.0f}원" if ex_key3 == "upbit" else f"${float(row['price']):,.4f}"
+                        col1.metric("현재가", price_str)
+                        col2.metric("24h 변동", f"{float(row.get('change_24h', 0) or 0):+.2f}%")
+                        col3.metric("거래량 변화", f"{_vc:+.0f}%")
+                    except (ValueError, TypeError):
+                        col1.metric("현재가", "-")
+                        col2.metric("24h 변동", "-")
+                        col3.metric("거래량 변화", "-")
                     st.markdown(f"**신호**: {row['signals']}")
         else:
             st.info("현재 거래량 급증 코인이 없습니다.")
@@ -3535,7 +3579,7 @@ elif page == "🪙 현물코인":
         if not recommendations.empty:
             # 진입점/손절/목표가 0인 경우 RSI+MA20 기반 개별 보정
             for idx in recommendations.index:
-                if recommendations.at[idx, 'entry_point'] == 0 and recommendations.at[idx, 'price'] > 0:
+                if 'entry_point' in recommendations.columns and recommendations.at[idx, 'entry_point'] == 0 and recommendations.at[idx, 'price'] > 0:
                     p = float(recommendations.at[idx, 'price'])
                     rsi = float(recommendations.at[idx, 'rsi']) if 'rsi' in recommendations.columns else 50
                     ma20 = float(recommendations.at[idx, 'ma20']) if 'ma20' in recommendations.columns and recommendations.at[idx, 'ma20'] > 0 else p
@@ -3600,10 +3644,19 @@ elif page == "🪙 현물코인":
             for _, row in recommendations.head(10).iterrows():
                 with st.expander(f"{row['rank']}. {row['name']} ({row['symbol']}) - 점수: {row['score']}"):
                     col1, col2, col3, col4, col5 = st.columns(5)
-                    price_str = f"{row['price']:,.0f}원" if ex_key5 == "upbit" else f"${row['price']:,.4f}"
-                    col1.metric("현재가", price_str)
-                    col2.metric("24h 변동", f"{row['change_24h']:+.2f}%")
-                    col3.metric("RSI", f"{row['rsi']:.0f}")
+                    try:
+                        price_str = f"{float(row['price']):,.0f}원" if ex_key5 == "upbit" else f"${float(row['price']):,.4f}"
+                        col1.metric("현재가", price_str)
+                    except (ValueError, TypeError):
+                        col1.metric("현재가", "-")
+                    try:
+                        col2.metric("24h 변동", f"{float(row.get('change_24h', 0)):+.2f}%")
+                    except (ValueError, TypeError):
+                        col2.metric("24h 변동", "-")
+                    try:
+                        col3.metric("RSI", f"{float(row.get('rsi', 50)):.0f}")
+                    except (ValueError, TypeError):
+                        col3.metric("RSI", "-")
                     macd_kr = {'golden': '골든크로스', 'dead': '데드크로스', 'bullish': '강세', 'bearish': '약세'}.get(row.get('macd_cross', ''), '-')
                     col4.metric("MACD", macd_kr)
                     col5.metric("총점", f"{row['score']:.1f}")
