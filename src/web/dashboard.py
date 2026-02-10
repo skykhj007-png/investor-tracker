@@ -739,10 +739,12 @@ elif page == "📌 내 관심종목":
         st.session_state.watchlist_kr = []
     if "watchlist_us" not in st.session_state:
         st.session_state.watchlist_us = []
+    if "watchlist_coin" not in st.session_state:
+        st.session_state.watchlist_coin = []  # [{"symbol": "BTC", "exchange": "upbit"}, ...]
 
     # 종목 추가 UI
     st.subheader("➕ 관심종목 추가")
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
 
     with col1:
         st.markdown("**🇰🇷 국내주식**")
@@ -774,11 +776,41 @@ elif page == "📌 내 관심종목":
             else:
                 st.error("티커를 입력하세요")
 
+    with col3:
+        st.markdown("**🪙 현물 코인**")
+        coin_ex = st.radio("거래소", ["업비트", "바이낸스"], horizontal=True, key="coin_watch_ex")
+        coin_input = st.text_input("코인 심볼 (예: BTC)", placeholder="BTC", key="coin_add_input")
+        if st.button("추가", key="add_coin"):
+            if coin_input and coin_input.strip():
+                sym = coin_input.strip().upper()
+                ex_key = "upbit" if coin_ex == "업비트" else "binance"
+                entry = {"symbol": sym, "exchange": ex_key}
+                if entry not in st.session_state.watchlist_coin:
+                    st.session_state.watchlist_coin.append(entry)
+                    st.success(f"{sym} ({coin_ex}) 추가됨")
+                    st.rerun()
+                else:
+                    st.warning("이미 등록된 코인입니다.")
+            else:
+                st.error("코인 심볼을 입력하세요 (예: BTC, ETH, XRP)")
+
+    # 인기 코인 빠른 추가
+    st.markdown("**인기 코인 빠른 추가:**")
+    popular_coins = ["BTC", "ETH", "XRP", "SOL", "DOGE", "ADA", "AVAX", "LINK"]
+    pcols = st.columns(len(popular_coins))
+    for i, pc in enumerate(popular_coins):
+        ex_key = "upbit" if coin_ex == "업비트" else "binance"
+        if pcols[i].button(pc, key=f"quick_coin_{pc}"):
+            entry = {"symbol": pc, "exchange": ex_key}
+            if entry not in st.session_state.watchlist_coin:
+                st.session_state.watchlist_coin.append(entry)
+                st.rerun()
+
     # 현재 등록된 종목 표시
     st.markdown("---")
     st.subheader("📋 등록된 관심종목")
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         st.markdown("**🇰🇷 국내주식**")
         if st.session_state.watchlist_kr:
@@ -803,8 +835,21 @@ elif page == "📌 내 관심종목":
         else:
             st.caption("등록된 미국주식이 없습니다")
 
+    with col3:
+        st.markdown("**🪙 현물 코인**")
+        if st.session_state.watchlist_coin:
+            for coin in st.session_state.watchlist_coin:
+                c1, c2 = st.columns([3, 1])
+                ex_label = "업비트" if coin['exchange'] == 'upbit' else "바이낸스"
+                c1.write(f"• {coin['symbol']} ({ex_label})")
+                if c2.button("❌", key=f"del_coin_{coin['symbol']}_{coin['exchange']}"):
+                    st.session_state.watchlist_coin.remove(coin)
+                    st.rerun()
+        else:
+            st.caption("등록된 코인이 없습니다")
+
     # 관심종목 분석 결과
-    if st.session_state.watchlist_kr or st.session_state.watchlist_us:
+    if st.session_state.watchlist_kr or st.session_state.watchlist_us or st.session_state.watchlist_coin:
         st.markdown("---")
         st.subheader("📊 관심종목 분석")
 
@@ -945,7 +990,104 @@ elif page == "📌 내 관심종목":
                     except Exception as e:
                         st.warning(f"{ticker} 분석 실패: {e}")
 
-            if not st.session_state.watchlist_kr and not st.session_state.watchlist_us:
+            if st.session_state.watchlist_coin:
+                st.markdown("### 🪙 현물 코인 매집 신호")
+                for coin in st.session_state.watchlist_coin:
+                    try:
+                        sym = coin['symbol']
+                        ex = coin['exchange']
+                        ex_label = "업비트" if ex == "upbit" else "바이낸스"
+                        market = f"KRW-{sym}" if ex == "upbit" else f"{sym}USDT"
+
+                        with st.spinner(f"{sym} ({ex_label}) 분석 중..."):
+                            crypto_scraper = get_crypto_scraper()
+                            # 시세 조회
+                            tickers = cached_top_coins(ex, 100)
+                            coin_row = tickers[tickers['symbol'] == sym] if not tickers.empty else pd.DataFrame()
+
+                            if not coin_row.empty:
+                                row = coin_row.iloc[0]
+                                price = float(row['price'])
+                                change = float(row.get('change_rate', 0))
+                                name = row.get('name', sym)
+
+                                # 캔들 데이터로 RSI/거래량 분석
+                                signals = []
+                                score = 50
+                                rsi_val = 50
+
+                                if ex == "upbit":
+                                    candles = crypto_scraper.upbit.get_daily_candles(f"KRW-{sym}", 30)
+                                else:
+                                    candles = crypto_scraper.binance.get_daily_candles(f"{sym}USDT", 30)
+
+                                if not candles.empty and len(candles) >= 14:
+                                    closes = candles['close']
+                                    # RSI
+                                    delta = closes.diff().dropna()
+                                    gains = delta.clip(lower=0)
+                                    losses = (-delta).clip(lower=0)
+                                    avg_g = gains.rolling(14).mean().iloc[-1]
+                                    avg_l = losses.rolling(14).mean().iloc[-1]
+                                    if avg_l > 0:
+                                        rs = avg_g / avg_l
+                                        rsi_val = round(100 - (100 / (1 + rs)), 1)
+                                    elif avg_g > 0:
+                                        rsi_val = 100
+
+                                    if rsi_val < 30:
+                                        signals.append(f"💚 RSI {rsi_val:.0f} 과매도")
+                                        score += 15
+                                    elif rsi_val > 70:
+                                        signals.append(f"🔴 RSI {rsi_val:.0f} 과매수")
+                                        score -= 10
+
+                                    # 거래량
+                                    if len(candles) >= 20:
+                                        avg_vol = candles['volume'].tail(20).mean()
+                                        today_vol = candles['volume'].iloc[-1]
+                                        if avg_vol > 0 and today_vol > avg_vol * 2:
+                                            signals.append("🔥 거래량 폭증 (2배+)")
+                                            score += 15
+                                        elif avg_vol > 0 and today_vol > avg_vol * 1.5:
+                                            signals.append("📈 거래량 급증 (1.5배)")
+                                            score += 10
+
+                                    # MA
+                                    ma5 = closes.tail(5).mean()
+                                    ma20 = closes.tail(20).mean()
+                                    if price > ma5 > ma20:
+                                        signals.append("📈 정배열")
+                                        score += 10
+                                    elif price < ma5 < ma20:
+                                        signals.append("📉 역배열")
+                                        score -= 10
+
+                                # 변동률
+                                if change > 5:
+                                    signals.append(f"🚀 급등 {change:+.1f}%")
+                                    score += 5
+                                elif change < -5:
+                                    signals.append(f"💥 급락 {change:+.1f}%")
+                                    score -= 5
+
+                                fmt_p = f"{price:,.0f}원" if ex == "upbit" else f"${price:,.4f}"
+
+                                with st.expander(f"**{name}** ({sym}, {ex_label}) - 매집점수: {score}", expanded=True):
+                                    c1, c2 = st.columns([1, 2])
+                                    c1.metric("현재가", fmt_p, f"{change:+.2f}%")
+                                    c2.write("**신호:**")
+                                    if signals:
+                                        for sig in signals:
+                                            c2.write(f"• {sig}")
+                                    else:
+                                        c2.write("• 특이 신호 없음")
+                            else:
+                                st.warning(f"{sym} ({ex_label}): 시세 데이터를 찾을 수 없습니다.")
+                    except Exception as e:
+                        st.warning(f"{coin['symbol']} 분석 실패: {e}")
+
+            if not st.session_state.watchlist_kr and not st.session_state.watchlist_us and not st.session_state.watchlist_coin:
                 st.info("종목을 등록하면 매집 신호를 분석합니다.")
 
         # ─── 기술적 분석 탭 ───
@@ -992,7 +1134,69 @@ elif page == "📌 내 관심종목":
                 if us_data:
                     st.dataframe(pd.DataFrame(us_data), use_container_width=True, hide_index=True)
 
-            if not st.session_state.watchlist_kr and not st.session_state.watchlist_us:
+            if st.session_state.watchlist_coin:
+                st.markdown("### 🪙 현물 코인 기술적 지표")
+                coin_data = []
+                for coin in st.session_state.watchlist_coin:
+                    try:
+                        sym = coin['symbol']
+                        ex = coin['exchange']
+                        ex_label = "업비트" if ex == "upbit" else "바이낸스"
+                        tickers = cached_top_coins(ex, 100)
+                        coin_row = tickers[tickers['symbol'] == sym] if not tickers.empty else pd.DataFrame()
+
+                        if not coin_row.empty:
+                            row = coin_row.iloc[0]
+                            price = float(row['price'])
+                            change = float(row.get('change_rate', 0))
+
+                            # 캔들 → RSI, MA
+                            crypto_scraper = get_crypto_scraper()
+                            if ex == "upbit":
+                                candles = crypto_scraper.upbit.get_daily_candles(f"KRW-{sym}", 30)
+                            else:
+                                candles = crypto_scraper.binance.get_daily_candles(f"{sym}USDT", 30)
+
+                            rsi_val = "-"
+                            ma5_str = "-"
+                            ma20_str = "-"
+
+                            if not candles.empty and len(candles) >= 14:
+                                closes = candles['close']
+                                delta = closes.diff().dropna()
+                                gains = delta.clip(lower=0)
+                                losses = (-delta).clip(lower=0)
+                                avg_g = gains.rolling(14).mean().iloc[-1]
+                                avg_l = losses.rolling(14).mean().iloc[-1]
+                                if avg_l > 0:
+                                    rsi_val = f"{100 - (100 / (1 + avg_g / avg_l)):.0f}"
+                                elif avg_g > 0:
+                                    rsi_val = "100"
+
+                                if len(closes) >= 5:
+                                    ma5 = closes.tail(5).mean()
+                                    ma5_str = f"{ma5:,.0f}" if ex == "upbit" else f"${ma5:,.2f}"
+                                if len(closes) >= 20:
+                                    ma20 = closes.tail(20).mean()
+                                    ma20_str = f"{ma20:,.0f}" if ex == "upbit" else f"${ma20:,.2f}"
+
+                            price_str = f"{price:,.0f}" if ex == "upbit" else f"${price:,.4f}"
+                            coin_data.append({
+                                '코인': row.get('name', sym),
+                                '심볼': sym,
+                                '거래소': ex_label,
+                                '현재가': price_str,
+                                '24h변동': f"{change:+.2f}%",
+                                'RSI': rsi_val,
+                                'MA5': ma5_str,
+                                'MA20': ma20_str,
+                            })
+                    except:
+                        pass
+                if coin_data:
+                    st.dataframe(pd.DataFrame(coin_data), use_container_width=True, hide_index=True)
+
+            if not st.session_state.watchlist_kr and not st.session_state.watchlist_us and not st.session_state.watchlist_coin:
                 st.info("종목을 등록하면 기술적 분석을 제공합니다.")
 
     else:
