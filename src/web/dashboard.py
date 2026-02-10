@@ -2254,8 +2254,14 @@ elif page == "📊 진입/손절 분석":
                     c1, c2, c3, c4 = st.columns(4)
                     c1.metric("외국인", f"{row.get('foreign_억', '-')}억")
                     c2.metric("기관", f"{row.get('inst_억', '-')}억")
-                    c3.metric("RSI", f"{row.get('rsi', 0):.0f}")
-                    c4.metric("PER", f"{row.get('per', 0):.1f}")
+                    try:
+                        c3.metric("RSI", f"{float(row.get('rsi', 0)):.0f}")
+                    except (ValueError, TypeError):
+                        c3.metric("RSI", "-")
+                    try:
+                        c4.metric("PER", f"{float(row.get('per', 0)):.1f}")
+                    except (ValueError, TypeError):
+                        c4.metric("PER", "-")
                     st.caption(f"신호: {row.get('signals', '')}")
 
             # 비교 테이블
