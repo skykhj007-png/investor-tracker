@@ -2,4 +2,19 @@ __pycache__/
 *.pyc
 *.pyo
 .env
+.env.*
 nul
+
+# Streamlit secrets (비밀번호 등)
+.streamlit/secrets.toml
+
+# Claude Code 로컬 설정
+.claude/
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# IDE
+.vscode/
+.idea/

@@ -81,6 +81,32 @@ st.set_page_config(
     layout="wide",
 )
 
+# ── 비밀번호 보호 (Streamlit Cloud secrets 또는 기본 비밀번호) ──
+def check_password():
+    """비밀번호 확인 게이트. secrets에 password가 설정되어 있으면 로그인 필요."""
+    # secrets에 password가 없으면 보호 비활성화
+    try:
+        correct_pw = st.secrets["password"]
+    except (KeyError, FileNotFoundError):
+        return True  # 비밀번호 미설정 → 자유 접근
+
+    if st.session_state.get("authenticated"):
+        return True
+
+    st.markdown("## 🔒 Investor Tracker")
+    st.markdown("이 대시보드는 비밀번호로 보호되어 있습니다.")
+    pw = st.text_input("비밀번호를 입력하세요", type="password", key="pw_input")
+    if st.button("로그인", key="pw_login"):
+        if pw == correct_pw:
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("비밀번호가 틀렸습니다.")
+    st.stop()
+
+if not check_password():
+    st.stop()
+
 # Auto refresh every 5 minutes (300 seconds) + 모바일 viewport 설정
 st.markdown(
     '''<meta http-equiv="refresh" content="300">
