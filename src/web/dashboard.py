@@ -4059,6 +4059,8 @@ elif page == "📡 실시간 모니터링":
     if _is_logged_in and _has_portfolio:
         from src.scrapers.portfolio import PortfolioManager
 
+        st.subheader("💰 내 보유자산")
+
         @st.cache_data(ttl=300, show_spinner=False)
         def _cached_portfolio(_upbit_tuple, _bithumb_tuple):
             uk = dict(zip(('access_key', 'secret_key'), _upbit_tuple)) if _upbit_tuple[0] else None
@@ -4088,7 +4090,25 @@ elif page == "📡 실시간 모니터링":
 
         _ut = (_upbit_keys.get('access_key', ''), _upbit_keys.get('secret_key', ''))
         _bt = (_bithumb_keys.get('api_key', ''), _bithumb_keys.get('secret_key', ''))
-        portfolio_df = _cached_portfolio(_ut, _bt)
+
+        try:
+            portfolio_df = _cached_portfolio(_ut, _bt)
+        except Exception as e:
+            portfolio_df = pd.DataFrame()
+            st.error(f"보유자산 조회 실패: {e}")
+
+        if portfolio_df.empty:
+            st.warning("보유자산을 불러올 수 없습니다. 서버 IP가 변경되었을 수 있습니다.")
+            @st.cache_data(ttl=3600, show_spinner=False)
+            def _get_server_ip():
+                try:
+                    import requests as _req
+                    r = _req.get("https://api.ipify.org?format=json", timeout=5)
+                    return r.json().get("ip", "확인 불가")
+                except Exception:
+                    return "확인 불가"
+            st.code(f"현재 서버 IP: {_get_server_ip()}", language=None)
+            st.caption("이 IP가 업비트 API 키에 등록된 IP와 다르면 업비트에서 IP를 업데이트하세요.")
 
         if not portfolio_df.empty:
             st.subheader("💰 내 보유자산")
