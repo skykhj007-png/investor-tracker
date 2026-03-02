@@ -4002,6 +4002,42 @@ elif page == "📡 실시간 모니터링":
     _has_portfolio = bool((_upbit_keys.get('access_key') and _upbit_keys.get('secret_key'))
                           or (_bithumb_keys.get('api_key') and _bithumb_keys.get('secret_key')))
 
+    if not _has_portfolio:
+        with st.expander("💰 내 보유자산 (API 키 미설정)", expanded=False):
+            st.info(
+                "거래소 API 키를 설정하면 보유 코인을 실시간으로 모니터링할 수 있습니다.\n\n"
+                "**설정 방법:**\n"
+                "1. 업비트/빗썸에서 **자산조회 전용** API 키 발급\n"
+                "2. IP 주소에 아래 **서버 IP** 등록\n"
+                "3. Streamlit Cloud → 앱 Settings → Secrets에 키 입력"
+            )
+            # 서버 아웃바운드 IP 표시
+            @st.cache_data(ttl=3600, show_spinner=False)
+            def _get_server_ip():
+                try:
+                    import requests as _req
+                    r = _req.get("https://api.ipify.org?format=json", timeout=5)
+                    return r.json().get("ip", "확인 불가")
+                except Exception:
+                    return "확인 불가"
+
+            server_ip = _get_server_ip()
+            st.code(f"이 서버의 IP 주소: {server_ip}", language=None)
+            st.caption("⬆️ 이 IP를 업비트/빗썸 API 키의 허용 IP에 등록하세요")
+
+            st.markdown(
+                "**Secrets 입력 형식:**\n"
+                "```toml\n"
+                "[upbit]\n"
+                'access_key = "발급받은_access_key"\n'
+                'secret_key = "발급받은_secret_key"\n\n'
+                "[bithumb]\n"
+                'api_key = "발급받은_api_key"\n'
+                'secret_key = "발급받은_secret_key"\n'
+                "```"
+            )
+        st.markdown("---")
+
     if _has_portfolio:
         from src.scrapers.portfolio import PortfolioManager
 
