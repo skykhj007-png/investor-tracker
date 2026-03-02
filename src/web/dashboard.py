@@ -4,6 +4,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import hashlib
 from streamlit_autorefresh import st_autorefresh
 
 import sys
@@ -612,13 +613,20 @@ page = st.sidebar.radio(
 )
 st.sidebar.markdown("---")
 
-# ── 사이드바 로그인 ──
+# ── 사이드바 로그인 (URL 토큰으로 새로고침에도 유지) ──
 try:
     _correct_pw = st.secrets["password"]
+    _auth_token = hashlib.sha256(_correct_pw.encode()).hexdigest()[:16]
+
+    # URL 토큰으로 자동 로그인 복원
+    if st.query_params.get("auth") == _auth_token:
+        st.session_state.authenticated = True
+
     if st.session_state.get("authenticated"):
         st.sidebar.success("🔓 로그인됨")
         if st.sidebar.button("로그아웃", key="pw_logout"):
             st.session_state.authenticated = False
+            st.query_params.clear()
             st.rerun()
     else:
         with st.sidebar.expander("🔒 로그인", expanded=False):
@@ -626,6 +634,7 @@ try:
             if st.button("로그인", key="pw_login"):
                 if _pw == _correct_pw:
                     st.session_state.authenticated = True
+                    st.query_params["auth"] = _auth_token
                     st.rerun()
                 else:
                     st.error("비밀번호가 틀렸습니다.")
