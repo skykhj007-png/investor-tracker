@@ -629,9 +629,11 @@ try:
             st.query_params.clear()
             st.rerun()
     else:
-        with st.sidebar.expander("🔒 로그인", expanded=False):
-            _pw = st.text_input("비밀번호", type="password", key="pw_input")
-            if st.button("로그인", key="pw_login"):
+        st.sidebar.markdown("### 🔒 로그인")
+        with st.sidebar.form("login_form"):
+            _pw = st.text_input("비밀번호", type="password")
+            _submitted = st.form_submit_button("로그인")
+            if _submitted:
                 if _pw == _correct_pw:
                     st.session_state.authenticated = True
                     st.query_params["auth"] = _auth_token
