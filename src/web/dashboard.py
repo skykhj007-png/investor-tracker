@@ -598,7 +598,7 @@ def translate_activity(activity: str) -> str:
     return activity  # 매칭 안 되면 원문 그대로
 
 # 메뉴 목록
-MENU_ITEMS = ["🏠 홈", "📡 실시간 모니터링", "📌 내 관심종목", "💼 포트폴리오", "🔍 공통 종목", "📈 변화 분석", "🌐 Grand Portfolio", "🇰🇷 국내주식", "🎯 종목 추천", "📊 진입/손절 분석", "🌍 해외 종목 추천", "💰 연금저축", "🪙 현물코인"]
+MENU_ITEMS = ["🏠 홈", "📡 실시간 모니터링", "📌 내 관심종목", "💼 포트폴리오", "🔍 공통 종목", "🌐 Grand Portfolio", "🇰🇷 국내주식", "🌍 해외 종목 추천", "💰 연금저축", "🪙 현물코인"]
 
 # 네비게이션 콜백 함수
 def navigate_to(page_name):
@@ -672,14 +672,11 @@ if page == "🏠 홈":
         ("📌", "내 관심종목", "보유/관심 종목 실시간 알림", "📌 내 관심종목"),
         ("💼", "포트폴리오", "개별 투자자 보유 종목 조회", "💼 포트폴리오"),
         ("🔍", "공통 종목", "투자자 공통 보유 종목", "🔍 공통 종목"),
-        ("📈", "변화 분석", "분기별 매수/매도 추적", "📈 변화 분석"),
         ("🌐", "Grand Portfolio", "전체 통합 포트폴리오", "🌐 Grand Portfolio"),
         ("🇰🇷", "국내주식", "투자자 동향/공매도/매집", "🇰🇷 국내주식"),
-        ("🎯", "종목 추천", "AI 종합 종목 추천", "🎯 종목 추천"),
-        ("📊", "진입/손절 분석", "주식 진입점·손절·목표가", "📊 진입/손절 분석"),
         ("🌍", "해외 종목 추천", "슈퍼투자자 기반 미국주식", "🌍 해외 종목 추천"),
         ("💰", "연금저축", "ETF 추천/심리분석", "💰 연금저축"),
-        ("🪙", "현물코인", "업비트/바이낸스 분석", "🪙 현물코인"),
+        ("🪙", "현물코인", "코인 검색/분석/추천", "🪙 현물코인"),
     ]
 
     for i in range(0, len(menu_buttons), 2):
@@ -1409,102 +1406,6 @@ elif page == "🔍 공통 종목":
     st.stop()
 
 
-# Changes page
-elif page == "📈 변화 분석":
-    st.title("📈 분기별 변화 분석")
-
-    # 투자자 목록 로딩
-    with st.spinner("투자자 목록 로딩..."):
-        changes_investors_df = cached_investor_list()
-
-    if not changes_investors_df.empty:
-        changes_investor_options = {
-            get_investor_display_name(row['investor_id'], row['name']): row['investor_id']
-            for _, row in changes_investors_df.iterrows()
-        }
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            changes_selected = st.selectbox("투자자 선택", list(changes_investor_options.keys()), key="changes_investor")
-            investor_id = changes_investor_options[changes_selected]
-
-            # 선택된 투자자 설명
-            if investor_id in FAMOUS_INVESTORS:
-                kr_name, desc = FAMOUS_INVESTORS[investor_id]
-                st.caption(f"ℹ️ **{kr_name}**: {desc}")
-        with col2:
-            # Check available quarters
-            quarters = get_database().get_available_quarters(investor_id)
-            st.write(f"저장된 분기: {quarters if quarters else '없음'}")
-    else:
-        st.error("투자자 목록을 가져올 수 없습니다.")
-        investor_id = "BRK"
-
-    st.caption("💡 **사용법**: ① '현재 데이터 저장' 클릭 → 현재 포트폴리오를 해당 분기로 저장 ② 두 분기를 비교하여 매수/매도 변화를 확인")
-
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        q1 = st.text_input("이전 분기 (예: 2024Q3)", value="2024Q3")
-    with col2:
-        q2 = st.text_input("현재 분기 (예: 2024Q4)", value="2024Q4")
-    with col3:
-        if st.button("📥 현재 데이터 저장", help="선택한 투자자의 현재 포트폴리오를 '현재 분기'로 저장합니다"):
-            with st.spinner("동기화 중..."):
-                analyzer = get_changes_analyzer()
-                analyzer.sync_portfolio(investor_id, q2)
-                st.success(f"{investor_id} 포트폴리오를 {q2}로 저장했습니다.")
-                st.rerun()
-
-    if st.button("🔍 분기 비교 분석", help="이전 분기와 현재 분기의 포트폴리오를 비교합니다"):
-        analyzer = get_changes_analyzer()
-        changes = analyzer.compare_quarters(investor_id, q1, q2)
-
-        if changes.empty:
-            st.info("변화가 없거나 데이터가 부족합니다. 먼저 '현재 데이터 저장'으로 분기 데이터를 저장해주세요.")
-        else:
-            # Summary
-            summary = analyzer.get_activity_summary(investor_id, q1, q2)
-
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("🆕 신규 매수", summary["new_positions"], delta_color="normal")
-            col2.metric("🔴 완전 매도", summary["exits"], delta_color="inverse")
-            col3.metric("📈 비중 증가", summary["increases"])
-            col4.metric("📉 비중 감소", summary["decreases"])
-
-            # Charts
-            col1, col2 = st.columns(2)
-
-            with col1:
-                new_df = changes[changes["change_type"] == "NEW"]
-                if not new_df.empty:
-                    fig = px.bar(new_df, x="symbol", y="curr_percent", title="🆕 신규 매수 종목 (현재 비중%)", color_discrete_sequence=["green"])
-                    fig.update_layout(xaxis_title="종목 티커", yaxis_title="포트폴리오 비중(%)")
-                    st.plotly_chart(fig, use_container_width=True)
-
-            with col2:
-                exit_df = changes[changes["change_type"] == "EXIT"]
-                if not exit_df.empty:
-                    fig = px.bar(exit_df, x="symbol", y="prev_percent", title="🔴 매도 종목 (이전 비중%)", color_discrete_sequence=["red"])
-                    fig.update_layout(xaxis_title="종목 티커", yaxis_title="이전 비중(%)")
-                    st.plotly_chart(fig, use_container_width=True)
-
-            # Full table - 한글화
-            st.subheader("전체 변화 내역")
-            changes_display = changes.copy()
-            change_type_kr = {'NEW': '🆕 신규 매수', 'EXIT': '🔴 전량 매도', 'INCREASE': '📈 비중 증가', 'DECREASE': '📉 비중 감소', 'UNCHANGED': '— 변동 없음'}
-            if 'change_type' in changes_display.columns:
-                changes_display['change_type'] = changes_display['change_type'].map(change_type_kr).fillna(changes_display['change_type'])
-            col_rename = {
-                'symbol': '티커', 'stock': '종목명',
-                'change_type': '변화 유형',
-                'prev_percent': f'{q1} 비중(%)',
-                'curr_percent': f'{q2} 비중(%)',
-                'change_amount': '변화량(%)',
-            }
-            changes_display = changes_display.rename(columns={k: v for k, v in col_rename.items() if k in changes_display.columns})
-            st.dataframe(changes_display, use_container_width=True, hide_index=True)
-    st.stop()
 
 
 # Grand Portfolio page
@@ -2172,626 +2073,6 @@ elif page == "🇰🇷 국내주식":
     st.stop()
 
 
-# Recommendation page
-elif page == "🎯 종목 추천":
-    st.title("🎯 AI 종목 추천")
-    st.markdown("*외국인/기관 수급과 공매도 데이터를 종합 분석한 매수 추천*")
-
-    # 이 페이지에서만 인스턴스 생성
-    recommender = get_recommender()
-
-    st.info("""
-    **점수 산정 기준 (최대 ~120점):**
-    - 외국인 순매수: 최대 30점 (순위+금액)
-    - 기관 순매수: 최대 30점 (순위+금액)
-    - 동반 매수 시너지: +10점
-    - 가격 모멘텀 (MA5/MA20): 최대 15점
-    - 거래량 급증: 최대 10점
-    - 시가총액/공매도: ±5점
-    - **PER/PBR 밸류에이션**: 최대 15점
-    - **RSI (14일)**: 최대 10점
-    - **MACD 크로스**: 최대 10점
-    """)
-
-    tab1, tab2, tab3, tab4 = st.tabs(["🏆 종합 추천", "⭐ 동반 매수", "🔥 역발상 매수", "📊 기술적 분석"])
-
-    with tab1:
-        st.subheader("종합 추천 TOP 20")
-
-        with st.spinner("데이터 분석 중..."):
-            recs = cached_recommendations(top_n=20)
-
-        if not recs.empty:
-            # 진입점 0인 경우 대시보드 폴백 (서버 호환성)
-            if 'entry_point' in recs.columns:
-                for idx in recs.index:
-                    if recs.at[idx, 'entry_point'] == 0:
-                        try:
-                            sym = recs.at[idx, 'symbol']
-                            price_info = get_kr_scraper().get_stock_price(sym)
-                            p = price_info.get('close', 0)
-                            if p > 0:
-                                rsi_v = float(recs.at[idx, 'rsi']) if 'rsi' in recs.columns else 50
-                                if rsi_v < 30:
-                                    recs.at[idx, 'entry_point'] = p
-                                else:
-                                    recs.at[idx, 'entry_point'] = int(p * 0.98)
-                                recs.at[idx, 'stop_loss'] = int(p * 0.93)
-                                recs.at[idx, 'stop_loss_pct'] = -7.0
-                                recs.at[idx, 'target_1'] = int(p * 1.05)
-                                recs.at[idx, 'target_1_pct'] = 5.0
-                                recs.at[idx, 'risk_reward'] = 1.0
-                        except Exception:
-                            pass
-
-            # Score chart
-            fig = px.bar(
-                recs.head(15),
-                x='name',
-                y='score',
-                title="종합 점수 TOP 15",
-                color='score',
-                color_continuous_scale="Bluered",
-                hover_data=['symbol', 'signals'],
-            )
-            fig.update_layout(xaxis_tickangle=-45)
-            st.plotly_chart(fig, use_container_width=True)
-
-            # 추천 상세 카드
-            st.subheader("📋 추천 상세")
-            for _, row in recs.head(10).iterrows():
-                with st.expander(f"{row['rank']}. {row['name']} ({row['symbol']}) - 점수: {row['score']}"):
-                    c1, c2, c3, c4, c5 = st.columns(5)
-                    c1.metric("외국인", f"{row.get('foreign_억', '-')}억")
-                    c2.metric("기관", f"{row.get('inst_억', '-')}억")
-                    c3.metric("RSI", f"{row.get('rsi', 0):.0f}")
-                    c4.metric("PER", f"{row.get('per', 0):.1f}")
-                    c5.metric("총점", f"{row['score']:.1f}")
-
-                    if row.get('entry_point', 0) > 0:
-                        st.markdown("---")
-                        e1, e2, e3, e4 = st.columns(4)
-                        e1.metric("🎯 진입점", f"{row['entry_point']:,.0f}원")
-                        e2.metric("🛑 손절", f"{row['stop_loss']:,.0f}원", f"{row['stop_loss_pct']:+.1f}%")
-                        if row.get('target_1', 0) > 0:
-                            e3.metric("📈 1차 목표", f"{row['target_1']:,.0f}원", f"+{row['target_1_pct']:.1f}%")
-                        _rr = row.get('risk_reward', 0)
-                        _rr_icon = "🟢" if _rr >= 2 else "🟡" if _rr >= 1 else "🔴"
-                        e4.metric("위험/보상", f"{_rr_icon} {_rr:.1f}:1")
-
-                    st.markdown(f"**신호**: {row['signals']}")
-
-            # Detailed table
-            st.subheader("📊 전체 추천 목록")
-            available_cols = ['rank', 'symbol', 'name', 'score', 'foreign_억', 'inst_억', 'short_ratio']
-            col_names = ['순위', '코드', '종목명', '점수', '외국인(억)', '기관(억)', '공매도(%)']
-
-            if 'entry_point' in recs.columns:
-                available_cols.extend(['entry_point', 'stop_loss', 'stop_loss_pct', 'target_1', 'risk_reward'])
-                col_names.extend(['진입점', '손절', '손절(%)', '1차목표', 'R/R'])
-            if 'per' in recs.columns:
-                available_cols.append('per')
-                col_names.append('PER')
-            if 'pbr' in recs.columns:
-                available_cols.append('pbr')
-                col_names.append('PBR')
-            if 'rsi' in recs.columns:
-                available_cols.append('rsi')
-                col_names.append('RSI')
-
-            avail = [c for c in available_cols if c in recs.columns]
-            avail_names = [col_names[available_cols.index(c)] for c in avail]
-            display_df = recs[avail].copy()
-            display_df.columns = avail_names
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
-
-            # 추천 종목 최근 공시
-            st.markdown("---")
-            st.subheader("📋 추천 종목 최근 공시")
-
-            top_stock_names = recs.head(5)['name'].tolist()
-
-            with st.spinner("추천 종목 공시 조회 중..."):
-                rec_disclosures = cached_disclosures_for_stocks(tuple(top_stock_names), days=14)
-
-            if not rec_disclosures.empty:
-                for _, drow in rec_disclosures.head(15).iterrows():
-                    date_str = str(drow['date'])
-                    if len(date_str) == 8:
-                        date_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
-                    type_badge = f"`{drow['report_type']}`" if drow.get('report_type') else ""
-                    st.markdown(
-                        f"**{date_str}** {type_badge} **{drow['company']}** - "
-                        f"[{drow['title']}]({drow['url']})"
-                    )
-            else:
-                st.info("최근 14일간 추천 종목 관련 공시가 없습니다.")
-        else:
-            st.warning("추천 데이터를 가져올 수 없습니다.")
-
-    with tab2:
-        st.subheader("⭐ 외국인 + 기관 동반 매수")
-        st.markdown("*외국인과 기관이 동시에 순매수하는 종목 - 가장 강력한 시그널*")
-
-        with st.spinner("분석 중..."):
-            dual = cached_dual_buying()
-
-        if not dual.empty:
-            # Chart
-            fig = px.scatter(
-                dual,
-                x='foreign_억',
-                y='inst_억',
-                size='score',
-                color='score',
-                text='name',
-                title="외국인 vs 기관 순매수 (버블 크기 = 점수)",
-                color_continuous_scale="Viridis",
-            )
-            fig.update_traces(textposition='top center')
-            fig.update_layout(
-                xaxis_title="외국인 순매수 (억원)",
-                yaxis_title="기관 순매수 (억원)",
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-            # Table
-            display_df = dual[['rank', 'symbol', 'name', 'score', 'foreign_억', 'inst_억']]
-            display_df.columns = ['순위', '코드', '종목명', '점수', '외국인(억)', '기관(억)']
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
-        else:
-            st.info("현재 외국인+기관 동반 매수 종목이 없습니다.")
-
-    with tab3:
-        st.subheader("🔥 역발상 매수 후보")
-        st.markdown("*공매도 비중이 높지만 외국인/기관이 매수하는 종목 - 숏 스퀴즈 가능성*")
-
-        st.warning("⚠️ 고위험 투자 전략입니다. 공매도 비중이 높다는 것은 하락 압력이 있다는 의미이기도 합니다.")
-
-        with st.spinner("분석 중..."):
-            contra = cached_contrarian()
-
-        if not contra.empty:
-            # Chart
-            fig = px.bar(
-                contra,
-                x='name',
-                y='short_ratio',
-                title="공매도 비중 (외국인/기관 매수 유입 종목)",
-                color='short_ratio',
-                color_continuous_scale="Reds",
-            )
-            fig.update_layout(xaxis_tickangle=-45)
-            st.plotly_chart(fig, use_container_width=True)
-
-            # Table
-            st.dataframe(contra, use_container_width=True, hide_index=True)
-        else:
-            st.info("현재 역발상 매수 후보 종목이 없습니다.")
-
-    with tab4:
-        st.subheader("📊 개별 종목 기술적 분석")
-        st.markdown("*추천 종목의 3년 차트 데이터를 분석하여 진입점/손절/목표가를 산출합니다.*")
-
-        if not recs.empty:
-            stock_options = {f"{row['name']} ({row['symbol']})": row['symbol']
-                            for _, row in recs.head(20).iterrows()}
-            selected_label = st.selectbox("종목 선택", list(stock_options.keys()), key="kr_tech_select")
-            selected_sym = stock_options[selected_label]
-
-            with st.spinner("3년 차트 분석 중..."):
-                ohlcv_3y = cached_kr_stock_ohlcv_3y(selected_sym)
-                recommender = get_recommender()
-                entry_data = recommender.get_entry_analysis(selected_sym, ohlcv_3y)
-
-            if 'error' not in entry_data:
-                # 메트릭
-                m1, m2, m3, m4, m5 = st.columns(5)
-                m1.metric("현재가", f"{entry_data['price']:,.0f}원")
-                m2.metric("🎯 진입점", f"{entry_data['entry_point']:,.0f}원")
-                m3.metric("🛑 손절", f"{entry_data['stop_loss']:,.0f}원", f"{entry_data['stop_loss_pct']:+.1f}%")
-                if entry_data.get('targets'):
-                    t = entry_data['targets'][0]
-                    m4.metric(f"📈 {t['label']}", f"{t['price']:,.0f}원", f"+{t['pct']:.1f}%")
-                rr = entry_data.get('risk_reward_ratio', 0)
-                rr_icon = "🟢" if rr >= 2 else "🟡" if rr >= 1 else "🔴"
-                m5.metric("위험/보상", f"{rr_icon} {rr:.1f}:1")
-
-                # MA / RSI 정보
-                st.markdown(f"**MA20**: {entry_data.get('ma20', 0):,.0f}원 | "
-                            f"**MA60**: {entry_data.get('ma60', 0):,.0f}원 | "
-                            f"**MA120**: {entry_data.get('ma120', 0):,.0f}원 | "
-                            f"**RSI**: {entry_data.get('rsi', 0):.0f}")
-
-                # 지지/저항
-                sup_col, res_col = st.columns(2)
-                with sup_col:
-                    st.markdown("**🟢 주요 지지선**")
-                    for lvl in entry_data.get('support_levels', [])[:4]:
-                        st.markdown(f"- {lvl['price']:,.0f}원 (강도: {'●' * min(lvl['strength'], 5)})")
-                with res_col:
-                    st.markdown("**🔴 주요 저항선**")
-                    for lvl in entry_data.get('resistance_levels', [])[:4]:
-                        st.markdown(f"- {lvl['price']:,.0f}원 (강도: {'●' * min(lvl['strength'], 5)})")
-
-                # 캔들차트 (최근 6개월) + 오버레이
-                if ohlcv_3y is not None and not ohlcv_3y.empty:
-                    import plotly.graph_objects as go
-                    chart_data = ohlcv_3y.tail(120).reset_index()
-                    col_map = {'날짜': 'date'}
-                    if '날짜' in chart_data.columns:
-                        chart_data = chart_data.rename(columns=col_map)
-                    elif chart_data.columns[0] != 'date':
-                        chart_data = chart_data.rename(columns={chart_data.columns[0]: 'date'})
-
-                    fig = go.Figure()
-                    fig.add_trace(go.Candlestick(
-                        x=chart_data['date'],
-                        open=chart_data['시가'], high=chart_data['고가'],
-                        low=chart_data['저가'], close=chart_data['종가'],
-                        name="가격"
-                    ))
-                    # MA
-                    all_closes = ohlcv_3y['종가']
-                    ma20_s = all_closes.rolling(20).mean().tail(120)
-                    ma60_s = all_closes.rolling(60).mean().tail(120)
-                    fig.add_trace(go.Scatter(x=chart_data['date'], y=ma20_s.values,
-                                            name='MA20', line=dict(color='orange', width=1)))
-                    fig.add_trace(go.Scatter(x=chart_data['date'], y=ma60_s.values,
-                                            name='MA60', line=dict(color='blue', width=1)))
-                    # 진입/손절/목표 수평선
-                    fig.add_hline(y=entry_data['entry_point'], line_dash="dash",
-                                  line_color="green", line_width=2,
-                                  annotation_text="진입점", annotation_position="bottom left")
-                    fig.add_hline(y=entry_data['stop_loss'], line_dash="dot",
-                                  line_color="red", line_width=2,
-                                  annotation_text="손절", annotation_position="bottom left")
-                    if entry_data.get('targets'):
-                        fig.add_hline(y=entry_data['targets'][0]['price'], line_dash="dash",
-                                      line_color="gold", line_width=2,
-                                      annotation_text="1차 목표", annotation_position="bottom left")
-                    if len(entry_data.get('targets', [])) >= 2:
-                        fig.add_hline(y=entry_data['targets'][1]['price'], line_dash="dot",
-                                      line_color="cyan", line_width=1,
-                                      annotation_text="2차 목표", annotation_position="bottom left")
-                    fig.update_layout(
-                        title=f"{selected_label} 최근 6개월 차트 (진입/손절/목표)",
-                        xaxis_rangeslider_visible=False,
-                        height=500,
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning("기술적 분석 데이터를 가져올 수 없습니다.")
-        else:
-            st.info("먼저 '종합 추천' 탭에서 추천 데이터를 로드해 주세요.")
-
-    # Disclaimer
-    st.markdown("---")
-    st.caption("⚠️ **투자 유의사항**: 이 추천은 참고용이며 투자 권유가 아닙니다. 투자 결정은 본인의 판단과 책임하에 하시기 바랍니다.")
-    st.stop()
-
-
-# ═══════════════ 진입/손절 분석 페이지 ═══════════════
-elif page == "📊 진입/손절 분석":
-    st.title("📊 진입/손절/목표가 분석")
-    st.markdown("*주식 & 코인의 매매 포인트를 한눈에 확인하세요.*")
-
-    entry_tab_kr, entry_tab_coin, entry_tab_search = st.tabs(["🇰🇷 주식 TOP 10", "🪙 코인", "🔍 종목 검색"])
-
-    # ── 탭1: 주식 상위 10종목 자동 표시 ──
-    with entry_tab_kr:
-        st.subheader("🇰🇷 AI 추천 주식 TOP 10 — 진입/손절/목표")
-
-        with st.spinner("추천 종목 분석 중... (최대 2분)"):
-            recs_entry = cached_recommendations(top_n=10)
-
-        if not recs_entry.empty:
-            # 폴백
-            if 'entry_point' in recs_entry.columns:
-                for idx in recs_entry.index:
-                    if recs_entry.at[idx, 'entry_point'] == 0:
-                        try:
-                            sym = recs_entry.at[idx, 'symbol']
-                            price_info = get_kr_scraper().get_stock_price(sym)
-                            p = price_info.get('close', 0)
-                            if p > 0:
-                                recs_entry.at[idx, 'entry_point'] = int(p * 0.98)
-                                recs_entry.at[idx, 'stop_loss'] = int(p * 0.93)
-                                recs_entry.at[idx, 'stop_loss_pct'] = -7.0
-                                recs_entry.at[idx, 'target_1'] = int(p * 1.05)
-                                recs_entry.at[idx, 'target_1_pct'] = 5.0
-                                recs_entry.at[idx, 'risk_reward'] = 1.0
-                        except Exception:
-                            pass
-
-            # 카드 (기본 펼쳐진 상태)
-            for _, row in recs_entry.iterrows():
-                with st.expander(f"**{row['rank']}. {row['name']}** ({row['symbol']}) — 점수: {row['score']:.0f}", expanded=(row['rank'] <= 3)):
-                    try:
-                        _ep = float(row.get('entry_point', 0) or 0)
-                    except (ValueError, TypeError):
-                        _ep = 0
-                    if _ep > 0:
-                        e1, e2, e3, e4 = st.columns(4)
-                        try:
-                            e1.metric("🎯 진입점", f"{_ep:,.0f}원")
-                            e2.metric("🛑 손절", f"{float(row['stop_loss']):,.0f}원", f"{float(row['stop_loss_pct']):+.1f}%")
-                        except (ValueError, TypeError):
-                            e1.metric("🎯 진입점", "-")
-                            e2.metric("🛑 손절", "-")
-                        try:
-                            _t1 = float(row.get('target_1', 0) or 0)
-                            if _t1 > 0:
-                                e3.metric("📈 1차 목표", f"{_t1:,.0f}원", f"+{float(row['target_1_pct']):.1f}%")
-                        except (ValueError, TypeError):
-                            pass
-                        try:
-                            _rr = float(row.get('risk_reward', 0) or 0)
-                            _rr_icon = "🟢" if _rr >= 2 else "🟡" if _rr >= 1 else "🔴"
-                            e4.metric("위험/보상", f"{_rr_icon} {_rr:.1f}:1")
-                        except (ValueError, TypeError):
-                            e4.metric("위험/보상", "-")
-                    c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("외국인", f"{row.get('foreign_억', '-')}억")
-                    c2.metric("기관", f"{row.get('inst_억', '-')}억")
-                    try:
-                        c3.metric("RSI", f"{float(row.get('rsi', 0)):.0f}")
-                    except (ValueError, TypeError):
-                        c3.metric("RSI", "-")
-                    try:
-                        c4.metric("PER", f"{float(row.get('per', 0)):.1f}")
-                    except (ValueError, TypeError):
-                        c4.metric("PER", "-")
-                    st.caption(f"신호: {row.get('signals', '')}")
-
-            # 비교 테이블
-            st.markdown("---")
-            table_cols = ['rank', 'symbol', 'name']
-            table_names = ['순위', '코드', '종목명']
-            if 'entry_point' in recs_entry.columns:
-                table_cols.extend(['entry_point', 'stop_loss', 'stop_loss_pct', 'target_1', 'risk_reward'])
-                table_names.extend(['진입점', '손절', '손절(%)', '1차목표', 'R/R'])
-            table_cols.extend(['score', 'rsi'])
-            table_names.extend(['점수', 'RSI'])
-            avail = [c for c in table_cols if c in recs_entry.columns]
-            avail_names = [table_names[table_cols.index(c)] for c in avail]
-            df_disp = recs_entry[avail].copy()
-            df_disp.columns = avail_names
-            st.dataframe(df_disp, use_container_width=True, hide_index=True)
-        else:
-            st.warning("추천 데이터를 가져올 수 없습니다.")
-
-    # ── 탭2: 코인 자동 표시 ──
-    with entry_tab_coin:
-        st.subheader("🪙 추천 코인 — 진입/손절/목표")
-
-        coin_ex = st.radio("거래소", ["upbit", "binance"], horizontal=True, key="entry_coin_ex")
-
-        with st.spinner("코인 추천 분석 중... (최대 2분)"):
-            coin_recs = cached_crypto_recommendations(coin_ex, 15)
-
-        if not coin_recs.empty:
-            # 폴백
-            if 'entry_point' in coin_recs.columns:
-                for idx in coin_recs.index:
-                    if coin_recs.at[idx, 'entry_point'] == 0 and coin_recs.at[idx, 'price'] > 0:
-                        p = float(coin_recs.at[idx, 'price'])
-                        rsi = float(coin_recs.at[idx, 'rsi']) if 'rsi' in coin_recs.columns else 50
-                        ma20 = float(coin_recs.at[idx, 'ma20']) if 'ma20' in coin_recs.columns and coin_recs.at[idx, 'ma20'] > 0 else p
-                        if rsi < 30:
-                            entry = round(p, 2)
-                        elif ma20 < p:
-                            entry = round(ma20, 2)
-                        else:
-                            entry = round(p * 0.97, 2)
-                        sl_pct = 0.95 if rsi < 30 else 0.93 if rsi < 50 else 0.90
-                        stop = round(entry * sl_pct, 2)
-                        tgt_mult = 1.15 if rsi < 30 else 1.08 if rsi < 50 else 1.05
-                        target = round(p * tgt_mult, 2)
-                        risk = abs(entry - stop) if entry else 1
-                        reward = abs(target - entry) if entry else 1
-                        coin_recs.at[idx, 'entry_point'] = entry
-                        coin_recs.at[idx, 'stop_loss'] = stop
-                        coin_recs.at[idx, 'stop_loss_pct'] = round((stop - entry) / entry * 100, 1) if entry else -5.0
-                        coin_recs.at[idx, 'target_1'] = target
-                        coin_recs.at[idx, 'target_1_pct'] = round((target - entry) / entry * 100, 1) if entry else 5.0
-                        coin_recs.at[idx, 'risk_reward'] = round(reward / risk, 1) if risk > 0 else 1.0
-
-            is_upbit = coin_ex == "upbit"
-            fmt_p = lambda v: f"{v:,.0f}원" if is_upbit else f"${v:,.4f}"
-
-            # 카드 (상위 3개 펼침)
-            for _, row in coin_recs.iterrows():
-                with st.expander(f"**{row['rank']}. {row['name']}** ({row['symbol']}) — 점수: {row['score']:.0f}", expanded=(row['rank'] <= 3)):
-                    if row.get('entry_point', 0) > 0:
-                        e1, e2, e3, e4 = st.columns(4)
-                        e1.metric("🎯 진입점", fmt_p(row['entry_point']))
-                        e2.metric("🛑 손절", fmt_p(row['stop_loss']), f"{row['stop_loss_pct']:+.1f}%")
-                        if row.get('target_1', 0) > 0:
-                            e3.metric("📈 1차 목표", fmt_p(row['target_1']), f"+{row['target_1_pct']:.1f}%")
-                        _rr = row.get('risk_reward', 0)
-                        _rr_icon = "🟢" if _rr >= 2 else "🟡" if _rr >= 1 else "🔴"
-                        e4.metric("위험/보상", f"{_rr_icon} {_rr:.1f}:1")
-                    c1, c2, c3 = st.columns(3)
-                    c1.metric("현재가", fmt_p(row['price']))
-                    try:
-                        c2.metric("24h", f"{float(row.get('change_24h', 0)):+.2f}%")
-                    except (ValueError, TypeError):
-                        c2.metric("24h", "-")
-                    try:
-                        c3.metric("RSI", f"{float(row.get('rsi', 50)):.0f}")
-                    except (ValueError, TypeError):
-                        c3.metric("RSI", "-")
-                    st.caption(f"신호: {row.get('signals', '')}")
-
-            # 비교 테이블
-            st.markdown("---")
-            ct_cols = ['rank', 'symbol', 'name', 'price']
-            ct_names = ['순위', '심볼', '코인명', '현재가']
-            if 'entry_point' in coin_recs.columns:
-                ct_cols.extend(['entry_point', 'stop_loss', 'stop_loss_pct', 'target_1', 'risk_reward'])
-                ct_names.extend(['진입점', '손절', '손절(%)', '1차목표', 'R/R'])
-            ct_cols.extend(['rsi', 'score'])
-            ct_names.extend(['RSI', '점수'])
-            cavail = [c for c in ct_cols if c in coin_recs.columns]
-            cavail_names = [ct_names[ct_cols.index(c)] for c in cavail]
-            cdf = coin_recs[cavail].copy()
-            cdf.columns = cavail_names
-            st.dataframe(cdf, use_container_width=True, hide_index=True)
-        else:
-            st.warning("코인 추천 데이터를 가져올 수 없습니다.")
-
-    # ── 탭3: 주식 종목 검색 ──
-    with entry_tab_search:
-        st.subheader("🔍 종목 직접 검색")
-
-        st.markdown("**인기 종목:**")
-        popular_kr = [
-            ("삼성전자", "005930"), ("SK하이닉스", "000660"), ("LG에너지솔루션", "373220"),
-            ("현대차", "005380"), ("기아", "000270"), ("셀트리온", "068270"),
-            ("NAVER", "035420"), ("카카오", "035720"), ("POSCO홀딩스", "005490"),
-            ("삼성SDI", "006400"), ("KB금융", "105560"), ("삼성바이오", "207940"),
-        ]
-        pcols = st.columns(6)
-        for i, (name, sym) in enumerate(popular_kr):
-            if pcols[i % 6].button(name, key=f"entry_pop_{sym}", use_container_width=True):
-                st.session_state._selected_entry_stock = sym
-                st.session_state._selected_entry_name = name
-
-        manual_code = st.text_input("종목 코드 직접 입력 (6자리)", placeholder="005930", key="entry_manual_code")
-        if manual_code and len(manual_code) == 6:
-            st.session_state._selected_entry_stock = manual_code
-            try:
-                from pykrx import stock as krx
-                st.session_state._selected_entry_name = krx.get_market_ticker_name(manual_code)
-            except Exception:
-                st.session_state._selected_entry_name = manual_code
-
-        selected_sym = st.session_state.get('_selected_entry_stock', None)
-        selected_name = st.session_state.get('_selected_entry_name', '')
-
-        if selected_sym:
-            st.markdown(f"### 분석: **{selected_name}** (`{selected_sym}`)")
-
-            with st.spinner(f"{selected_name} 종합 분석 중..."):
-                ohlcv_3y = cached_kr_stock_ohlcv_3y(selected_sym)
-                recommender = get_recommender()
-                d = recommender.get_comprehensive_analysis(selected_sym, ohlcv_3y)
-
-            if d.get('price', 0) > 0:
-                # ── 종합 투자 의견 ──
-                op = d.get('opinion', '분석 불가')
-                op_emoji = d.get('opinion_emoji', '⚪')
-                st.markdown(f"## {op_emoji} 종합 의견: **{op}**")
-                reasons = d.get('opinion_reasons', [])
-                if reasons:
-                    st.markdown(" | ".join(reasons))
-
-                # ── 매매 포인트 ──
-                st.markdown("### 🎯 매매 포인트")
-                e1, e2, e3, e4 = st.columns(4)
-                _ep_delta = ""
-                if d.get('entry_point') and d.get('price', 0) > 0:
-                    _ep_delta = f"{(d['entry_point'] - d['price']) / d['price'] * 100:+.1f}%"
-                e1.metric("🎯 진입점", f"{d.get('entry_point', 0):,.0f}원", _ep_delta)
-                e2.metric("🛑 손절", f"{d.get('stop_loss', 0):,.0f}원", f"{d.get('stop_loss_pct', 0):+.1f}%")
-                targets = d.get('targets', [])
-                if targets:
-                    e3.metric(f"📈 {targets[0]['label']}", f"{targets[0]['price']:,.0f}원", f"+{targets[0]['pct']:.1f}%")
-                rr = d.get('risk_reward_ratio', 0)
-                rr_icon = "🟢" if rr >= 2 else "🟡" if rr >= 1 else "🔴"
-                e4.metric("위험/보상", f"{rr_icon} {rr:.1f}:1")
-
-                # ── 재무 지표 ──
-                def _safe_fmt(val, fmt_str, suffix=""):
-                    try:
-                        if val and val == val:  # not None/0/NaN
-                            return f"{val:{fmt_str}}{suffix}"
-                    except (ValueError, TypeError):
-                        pass
-                    return "-"
-
-                st.markdown("### 📊 재무 지표")
-                f1, f2, f3, f4, f5, f6 = st.columns(6)
-                f1.metric("현재가", f"{d['price']:,.0f}원")
-                f2.metric("PER", _safe_fmt(d.get('per', 0), ",.1f"))
-                f3.metric("PBR", _safe_fmt(d.get('pbr', 0), ",.2f"))
-                f4.metric("ROE", _safe_fmt(d.get('roe', 0), ".1f", "%"))
-                f5.metric("EPS", _safe_fmt(d.get('eps', 0), ",.0f", "원"))
-                f6.metric("배당률", _safe_fmt(d.get('div_yield', 0), ".1f", "%"))
-
-                # ── 기술적 지표 ──
-                st.markdown("### 📈 기술적 지표")
-                t1, t2, t3, t4, t5 = st.columns(5)
-                t1.metric("RSI", f"{d.get('rsi', 0):.0f}")
-                t2.metric("MA20", f"{d.get('ma20', 0):,.0f}원")
-                t3.metric("MA60", f"{d.get('ma60', 0):,.0f}원")
-                t4.metric("MA120", f"{d.get('ma120', 0):,.0f}원")
-                ma_align = d.get('ma_alignment', '-')
-                macd_kr = {'golden': '골든크로스', 'dead': '데드크로스', 'bullish': '강세', 'bearish': '약세', 'none': '-'}.get(d.get('macd_cross', 'none'), '-')
-                t5.metric("MACD", macd_kr)
-
-                cap = d.get('market_cap', 0)
-                cap_label = d.get('cap_label', '')
-                if cap > 0:
-                    st.markdown(f"**시가총액**: {cap / 1e12:.1f}조원 ({cap_label}) | **이동평균**: {ma_align}")
-
-                # ── 전망 ──
-                outlook = d.get('outlook', [])
-                if outlook:
-                    st.markdown("### 🔮 전망")
-                    for ol in outlook:
-                        st.markdown(f"- {ol}")
-
-                # ── 지지/저항 ──
-                st.markdown("---")
-                sup_col, res_col = st.columns(2)
-                with sup_col:
-                    st.markdown("**🟢 주요 지지선**")
-                    for lvl in d.get('support_levels', [])[:4]:
-                        pct = (lvl['price'] - d['price']) / d['price'] * 100
-                        st.markdown(f"- **{lvl['price']:,.0f}원** ({pct:+.1f}%) {'●' * min(lvl['strength'], 5)}")
-                with res_col:
-                    st.markdown("**🔴 주요 저항선**")
-                    for lvl in d.get('resistance_levels', [])[:4]:
-                        pct = (lvl['price'] - d['price']) / d['price'] * 100
-                        st.markdown(f"- **{lvl['price']:,.0f}원** ({pct:+.1f}%) {'●' * min(lvl['strength'], 5)}")
-
-                # ── 캔들차트 ──
-                if ohlcv_3y is not None and not ohlcv_3y.empty:
-                    import plotly.graph_objects as go
-                    chart_period = st.radio("차트 기간", ["3개월", "6개월", "1년", "3년"],
-                                            index=1, horizontal=True, key="entry_chart_period")
-                    period_map = {"3개월": 60, "6개월": 120, "1년": 250, "3년": len(ohlcv_3y)}
-                    n_bars = period_map[chart_period]
-                    chart_data = ohlcv_3y.tail(n_bars).reset_index()
-                    if chart_data.columns[0] != 'date':
-                        chart_data = chart_data.rename(columns={chart_data.columns[0]: 'date'})
-                    fig = go.Figure()
-                    fig.add_trace(go.Candlestick(
-                        x=chart_data['date'], open=chart_data['시가'], high=chart_data['고가'],
-                        low=chart_data['저가'], close=chart_data['종가'], name="가격"))
-                    all_closes = ohlcv_3y['종가']
-                    for ml, clr, nm in [(20, 'orange', 'MA20'), (60, 'blue', 'MA60'), (120, 'purple', 'MA120')]:
-                        ms = all_closes.rolling(ml).mean().tail(n_bars)
-                        fig.add_trace(go.Scatter(x=chart_data['date'], y=ms.values, name=nm, line=dict(color=clr, width=1)))
-                    if d.get('entry_point', 0) > 0:
-                        fig.add_hline(y=d['entry_point'], line_dash="dash", line_color="green", line_width=2,
-                                      annotation_text=f"진입 {d['entry_point']:,.0f}", annotation_position="bottom left")
-                        fig.add_hline(y=d['stop_loss'], line_dash="dot", line_color="red", line_width=2,
-                                      annotation_text=f"손절 {d['stop_loss']:,.0f}", annotation_position="bottom left")
-                    for t in d.get('targets', [])[:2]:
-                        fig.add_hline(y=t['price'], line_dash="dash", line_color="gold", line_width=2,
-                                      annotation_text=f"{t['label']} {t['price']:,.0f}", annotation_position="bottom left")
-                    fig.update_layout(title=f"{selected_name} — {chart_period} 차트", xaxis_rangeslider_visible=False, height=550)
-                    st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning("분석 데이터를 가져올 수 없습니다. 종목 코드를 확인해 주세요.")
-
-    st.markdown("---")
-    st.caption("⚠️ **투자 유의사항**: 이 분석은 참고용이며 투자 권유가 아닙니다. 투자 결정은 본인의 판단과 책임하에 하시기 바랍니다.")
-    st.stop()
-
 
 # US Stock Recommendation page
 elif page == "🌍 해외 종목 추천":
@@ -3418,11 +2699,182 @@ elif page == "🪙 현물코인":
     crypto_scraper = get_crypto_scraper()
     crypto_recommender = get_crypto_recommender()
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📊 시세 현황", "🔥 급등/급락", "📈 거래량 급증", "🔧 기술적 분석", "🏆 종합 추천"
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "🔍 코인 검색", "📊 시세 현황", "🔥 급등/급락", "📈 거래량 급증", "🔧 기술적 분석", "🏆 종합 추천"
     ])
 
+    # ── 🔍 코인 검색 탭 ──
     with tab1:
+        st.subheader("🔍 코인 검색 및 분석")
+
+        search_col1, search_col2 = st.columns([1, 2])
+        with search_col1:
+            search_exchange = st.radio(
+                "거래소", ["업비트 (KRW)", "빗썸 (KRW)", "바이낸스 (USDT)"],
+                key="coin_search_exchange", horizontal=True
+            )
+
+        # 코인 목록 로딩
+        @st.cache_data(ttl=600, show_spinner=False)
+        def _get_coin_list(exchange_name):
+            if "업비트" in exchange_name:
+                markets = crypto_scraper.upbit.get_krw_markets()
+                if not markets.empty:
+                    return [f"{r['korean_name']} ({r['symbol']})" for _, r in markets.iterrows()]
+            elif "빗썸" in exchange_name:
+                tickers = crypto_scraper.bithumb.get_krw_tickers()
+                if not tickers.empty:
+                    return [f"{r['name']} ({r['symbol']})" if 'name' in r and r.get('name') else r['symbol'] for _, r in tickers.iterrows()]
+            else:
+                stats = crypto_scraper.binance.get_24hr_stats()
+                if not stats.empty:
+                    return [f"{r['symbol']} (USDT)" for _, r in stats.head(100).iterrows()]
+            return []
+
+        coin_list = _get_coin_list(search_exchange)
+
+        with search_col2:
+            if coin_list:
+                selected_coin = st.selectbox(
+                    "코인 선택", coin_list, key="coin_search_select",
+                    placeholder="코인을 검색하세요..."
+                )
+            else:
+                selected_coin = None
+                st.warning("코인 목록을 불러올 수 없습니다.")
+
+        if selected_coin and st.button("📊 분석 시작", key="coin_search_btn", type="primary"):
+            # 심볼 추출
+            import re as _re
+            symbol_match = _re.search(r'\(([^)]+)\)', selected_coin)
+            if symbol_match:
+                _symbol = symbol_match.group(1)
+            else:
+                _symbol = selected_coin
+
+            # 거래소별 market_id 생성
+            if "업비트" in search_exchange:
+                _ex_key = "upbit"
+                _market_id = f"KRW-{_symbol}"
+            elif "빗썸" in search_exchange:
+                _ex_key = "bithumb"
+                _market_id = _symbol
+            else:
+                _ex_key = "binance"
+                _market_id = f"{_symbol}USDT"
+
+            with st.spinner(f"{_symbol} 분석 중..."):
+                analysis = crypto_recommender.get_technical_analysis(_market_id, _ex_key)
+
+            if analysis and analysis.get('rsi') is not None:
+                st.markdown("---")
+
+                # 기본 정보
+                st.markdown(f"### {analysis.get('name', _symbol)} ({_symbol})")
+                info_cols = st.columns(4)
+                _cp = analysis.get('current_price', 0)
+                _cp_fmt = f"₩{_cp:,.0f}" if "업비트" in search_exchange or "빗썸" in search_exchange else f"${_cp:,.2f}"
+                info_cols[0].metric("현재가", _cp_fmt)
+
+                _rsi = analysis.get('rsi', 0)
+                _rsi_label = "과매도" if _rsi < 30 else "과매수" if _rsi > 70 else "중립"
+                info_cols[1].metric("RSI", f"{_rsi:.1f}", _rsi_label)
+
+                _macd = analysis.get('macd', {})
+                _macd_cross = _macd.get('cross', 'none')
+                _macd_label = "골든크로스" if _macd_cross == 'golden' else "데드크로스" if _macd_cross == 'dead' else "—"
+                info_cols[2].metric("MACD", _macd_label)
+
+                _bb = analysis.get('bollinger', {})
+                _bb_pos = _bb.get('position', '—')
+                _bb_label = "하단(과매도)" if _bb_pos == 'below_lower' else "상단(과매수)" if _bb_pos == 'above_upper' else "밴드 내"
+                info_cols[3].metric("볼린저", _bb_label)
+
+                # 매매 포인트
+                st.markdown("#### 🎯 매매 포인트")
+                point_cols = st.columns(4)
+                _entry = analysis.get('entry_point', 0)
+                _stop = analysis.get('stop_loss', 0)
+                _targets = analysis.get('targets', {})
+                _t1 = _targets.get('target1', 0)
+                _t2 = _targets.get('target2', 0)
+
+                if "업비트" in search_exchange or "빗썸" in search_exchange:
+                    point_cols[0].metric("🟢 진입점", f"₩{_entry:,.0f}" if _entry else "—")
+                    _stop_pct = ((_stop - _cp) / _cp * 100) if _cp and _stop else 0
+                    point_cols[1].metric("🔴 손절", f"₩{_stop:,.0f}" if _stop else "—", f"{_stop_pct:.1f}%" if _stop_pct else None)
+                    _t1_pct = ((_t1 - _cp) / _cp * 100) if _cp and _t1 else 0
+                    point_cols[2].metric("🎯 목표1", f"₩{_t1:,.0f}" if _t1 else "—", f"+{_t1_pct:.1f}%" if _t1_pct > 0 else None)
+                    _t2_pct = ((_t2 - _cp) / _cp * 100) if _cp and _t2 else 0
+                    point_cols[3].metric("🎯 목표2", f"₩{_t2:,.0f}" if _t2 else "—", f"+{_t2_pct:.1f}%" if _t2_pct > 0 else None)
+                else:
+                    point_cols[0].metric("🟢 진입점", f"${_entry:,.2f}" if _entry else "—")
+                    _stop_pct = ((_stop - _cp) / _cp * 100) if _cp and _stop else 0
+                    point_cols[1].metric("🔴 손절", f"${_stop:,.2f}" if _stop else "—", f"{_stop_pct:.1f}%" if _stop_pct else None)
+                    _t1_pct = ((_t1 - _cp) / _cp * 100) if _cp and _t1 else 0
+                    point_cols[2].metric("🎯 목표1", f"${_t1:,.2f}" if _t1 else "—", f"+{_t1_pct:.1f}%" if _t1_pct > 0 else None)
+                    _t2_pct = ((_t2 - _cp) / _cp * 100) if _cp and _t2 else 0
+                    point_cols[3].metric("🎯 목표2", f"${_t2:,.2f}" if _t2 else "—", f"+{_t2_pct:.1f}%" if _t2_pct > 0 else None)
+
+                # 위험/보상 비율
+                _rr = analysis.get('risk_reward', 0)
+                if _rr and _rr > 0:
+                    _rr_color = "🟢" if _rr >= 2 else "🟡" if _rr >= 1 else "🔴"
+                    st.metric("위험/보상 비율", f"{_rr_color} 1:{_rr:.1f}")
+
+                # 캔들차트
+                _candles = analysis.get('candles')
+                if _candles is not None and not _candles.empty:
+                    st.markdown("#### 📉 차트")
+                    fig = go.Figure()
+                    fig.add_trace(go.Candlestick(
+                        x=_candles.index if 'date' not in _candles.columns else _candles['date'],
+                        open=_candles['open'], high=_candles['high'],
+                        low=_candles['low'], close=_candles['close'],
+                        name="캔들"
+                    ))
+                    if 'ma5' in _candles.columns:
+                        _x_axis = _candles.index if 'date' not in _candles.columns else _candles['date']
+                        fig.add_trace(go.Scatter(x=_x_axis, y=_candles['ma5'], name="MA5", line=dict(width=1, color='orange')))
+                    if 'ma20' in _candles.columns:
+                        fig.add_trace(go.Scatter(x=_x_axis, y=_candles['ma20'], name="MA20", line=dict(width=1, color='blue')))
+                    if 'bb_upper' in _candles.columns:
+                        fig.add_trace(go.Scatter(x=_x_axis, y=_candles['bb_upper'], name="BB상단", line=dict(width=1, dash='dot', color='gray')))
+                        fig.add_trace(go.Scatter(x=_x_axis, y=_candles['bb_lower'], name="BB하단", line=dict(width=1, dash='dot', color='gray')))
+                    # 진입/손절/목표 수평선
+                    if _entry:
+                        fig.add_hline(y=_entry, line_dash="dash", line_color="green", annotation_text="진입")
+                    if _stop:
+                        fig.add_hline(y=_stop, line_dash="dash", line_color="red", annotation_text="손절")
+                    if _t1:
+                        fig.add_hline(y=_t1, line_dash="dot", line_color="blue", annotation_text="목표1")
+
+                    fig.update_layout(
+                        title=f"{_symbol} 일봉 차트",
+                        xaxis_rangeslider_visible=False,
+                        height=500
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+                # 종합 신호
+                _signals = analysis.get('signals', [])
+                if _signals:
+                    st.markdown("#### 📋 종합 신호")
+                    st.markdown(" ".join([f"`{s}`" for s in _signals]))
+
+                # 매수/관망/매도 판정
+                _score = analysis.get('score', 0)
+                if _score >= 70:
+                    st.success(f"✅ **매수 추천** (점수: {_score}점)")
+                elif _score >= 40:
+                    st.info(f"👀 **관망** (점수: {_score}점)")
+                else:
+                    st.warning(f"⚠️ **매도/회피** (점수: {_score}점)")
+
+            else:
+                st.error(f"{_symbol} 분석 데이터를 가져올 수 없습니다. 심볼을 확인해주세요.")
+
+    with tab2:
         st.subheader("거래대금 상위 코인")
 
         # 공포탐욕지수 + 김치프리미엄 표시
@@ -3504,7 +2956,7 @@ elif page == "🪙 현물코인":
         else:
             st.warning("시세 데이터를 가져올 수 없습니다.")
 
-    with tab2:
+    with tab3:
         st.subheader("24시간 급등/급락 코인")
 
         exchange2 = st.radio("거래소", ["업비트 (KRW)", "바이낸스 (USDT)", "빗썸 (KRW)"], key="t2_exchange", horizontal=True)
@@ -3563,7 +3015,7 @@ elif page == "🪙 현물코인":
             else:
                 st.info("데이터 없음")
 
-    with tab3:
+    with tab4:
         st.subheader("거래량 급증 코인")
         st.markdown("*최근 거래량이 7일 평균 대비 급증한 코인*")
 
@@ -3605,7 +3057,7 @@ elif page == "🪙 현물코인":
         else:
             st.info("현재 거래량 급증 코인이 없습니다.")
 
-    with tab4:
+    with tab5:
         st.subheader("개별 코인 기술적 분석")
 
         exchange4 = st.radio("거래소", ["업비트 (KRW)", "바이낸스 (USDT)", "빗썸 (KRW)"], key="t4_exchange", horizontal=True)
@@ -3794,7 +3246,7 @@ elif page == "🪙 현물코인":
         else:
             st.warning("코인 목록을 가져올 수 없습니다.")
 
-    with tab5:
+    with tab6:
         st.subheader("종합 추천 코인")
         st.markdown("*모멘텀 + 거래량 + 기술적 분석 종합 점수*")
 
