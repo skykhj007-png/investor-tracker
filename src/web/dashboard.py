@@ -4,6 +4,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from streamlit_autorefresh import st_autorefresh
 
 import sys
 from pathlib import Path
@@ -83,10 +84,12 @@ st.set_page_config(
 
 # 비밀번호는 사이드바에서 로그인 방식으로 처리 (아래 sidebar 섹션 참조)
 
-# Auto refresh every 5 minutes (300 seconds) + 모바일 viewport 설정
+# Auto refresh every 5 minutes (세션 유지, 로그인 안 풀림)
+st_autorefresh(interval=300_000, key="auto_refresh")
+
+# 모바일 viewport 설정
 st.markdown(
-    '''<meta http-equiv="refresh" content="300">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">''',
+    '<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">',
     unsafe_allow_html=True,
 )
 
