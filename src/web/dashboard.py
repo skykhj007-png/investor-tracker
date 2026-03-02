@@ -81,31 +81,7 @@ st.set_page_config(
     layout="wide",
 )
 
-# ── 비밀번호 보호 (Streamlit Cloud secrets 또는 기본 비밀번호) ──
-def check_password():
-    """비밀번호 확인 게이트. secrets에 password가 설정되어 있으면 로그인 필요."""
-    # secrets에 password가 없으면 보호 비활성화
-    try:
-        correct_pw = st.secrets["password"]
-    except (KeyError, FileNotFoundError):
-        return True  # 비밀번호 미설정 → 자유 접근
-
-    if st.session_state.get("authenticated"):
-        return True
-
-    st.markdown("## 🔒 Investor Tracker")
-    st.markdown("이 대시보드는 비밀번호로 보호되어 있습니다.")
-    pw = st.text_input("비밀번호를 입력하세요", type="password", key="pw_input")
-    if st.button("로그인", key="pw_login"):
-        if pw == correct_pw:
-            st.session_state.authenticated = True
-            st.rerun()
-        else:
-            st.error("비밀번호가 틀렸습니다.")
-    st.stop()
-
-if not check_password():
-    st.stop()
+# 비밀번호는 사이드바에서 로그인 방식으로 처리 (아래 sidebar 섹션 참조)
 
 # Auto refresh every 5 minutes (300 seconds) + 모바일 viewport 설정
 st.markdown(
@@ -631,6 +607,28 @@ page = st.sidebar.radio(
     MENU_ITEMS,
     key="nav_menu"
 )
+st.sidebar.markdown("---")
+
+# ── 사이드바 로그인 ──
+try:
+    _correct_pw = st.secrets["password"]
+    if st.session_state.get("authenticated"):
+        st.sidebar.success("🔓 로그인됨")
+        if st.sidebar.button("로그아웃", key="pw_logout"):
+            st.session_state.authenticated = False
+            st.rerun()
+    else:
+        with st.sidebar.expander("🔒 로그인", expanded=False):
+            _pw = st.text_input("비밀번호", type="password", key="pw_input")
+            if st.button("로그인", key="pw_login"):
+                if _pw == _correct_pw:
+                    st.session_state.authenticated = True
+                    st.rerun()
+                else:
+                    st.error("비밀번호가 틀렸습니다.")
+except (KeyError, FileNotFoundError):
+    pass  # password 미설정 → 로그인 UI 숨김
+
 st.sidebar.markdown("---")
 st.sidebar.markdown("Made with Streamlit")
 st.sidebar.markdown("[GitHub](https://github.com/skykhj007-png/investor-tracker)")
@@ -3987,58 +3985,66 @@ elif page == "📡 실시간 모니터링":
 
     st.markdown("---")
 
-    # ── 보유자산 모니터링 ──
-    _upbit_keys = {}
-    _bithumb_keys = {}
-    try:
-        _upbit_keys = dict(st.secrets.get("upbit", {}))
-    except Exception:
-        pass
-    try:
-        _bithumb_keys = dict(st.secrets.get("bithumb", {}))
-    except Exception:
-        pass
+    # ── 보유자산 모니터링 (로그인 필요) ──
+    _is_logged_in = st.session_state.get("authenticated", False)
+    _has_portfolio = False
 
-    _has_portfolio = bool((_upbit_keys.get('access_key') and _upbit_keys.get('secret_key'))
-                          or (_bithumb_keys.get('api_key') and _bithumb_keys.get('secret_key')))
-
-    if not _has_portfolio:
-        with st.expander("💰 내 보유자산 (API 키 미설정)", expanded=False):
-            st.info(
-                "거래소 API 키를 설정하면 보유 코인을 실시간으로 모니터링할 수 있습니다.\n\n"
-                "**설정 방법:**\n"
-                "1. 업비트/빗썸에서 **자산조회 전용** API 키 발급\n"
-                "2. IP 주소에 아래 **서버 IP** 등록\n"
-                "3. Streamlit Cloud → 앱 Settings → Secrets에 키 입력"
-            )
-            # 서버 아웃바운드 IP 표시
-            @st.cache_data(ttl=3600, show_spinner=False)
-            def _get_server_ip():
-                try:
-                    import requests as _req
-                    r = _req.get("https://api.ipify.org?format=json", timeout=5)
-                    return r.json().get("ip", "확인 불가")
-                except Exception:
-                    return "확인 불가"
-
-            server_ip = _get_server_ip()
-            st.code(f"이 서버의 IP 주소: {server_ip}", language=None)
-            st.caption("⬆️ 이 IP를 업비트/빗썸 API 키의 허용 IP에 등록하세요")
-
-            st.markdown(
-                "**Secrets 입력 형식:**\n"
-                "```toml\n"
-                "[upbit]\n"
-                'access_key = "발급받은_access_key"\n'
-                'secret_key = "발급받은_secret_key"\n\n'
-                "[bithumb]\n"
-                'api_key = "발급받은_api_key"\n'
-                'secret_key = "발급받은_secret_key"\n'
-                "```"
-            )
+    if not _is_logged_in:
+        st.info("🔒 사이드바에서 로그인하면 보유자산을 확인할 수 있습니다.")
         st.markdown("---")
 
-    if _has_portfolio:
+    if _is_logged_in:
+        _upbit_keys = {}
+        _bithumb_keys = {}
+        try:
+            _upbit_keys = dict(st.secrets.get("upbit", {}))
+        except Exception:
+            pass
+        try:
+            _bithumb_keys = dict(st.secrets.get("bithumb", {}))
+        except Exception:
+            pass
+
+        _has_portfolio = bool((_upbit_keys.get('access_key') and _upbit_keys.get('secret_key'))
+                              or (_bithumb_keys.get('api_key') and _bithumb_keys.get('secret_key')))
+
+        if not _has_portfolio:
+            with st.expander("💰 내 보유자산 (API 키 미설정)", expanded=False):
+                st.info(
+                    "거래소 API 키를 설정하면 보유 코인을 실시간으로 모니터링할 수 있습니다.\n\n"
+                    "**설정 방법:**\n"
+                    "1. 업비트/빗썸에서 **자산조회 전용** API 키 발급\n"
+                    "2. IP 주소에 아래 **서버 IP** 등록\n"
+                    "3. Streamlit Cloud → 앱 Settings → Secrets에 키 입력"
+                )
+                # 서버 아웃바운드 IP 표시
+                @st.cache_data(ttl=3600, show_spinner=False)
+                def _get_server_ip():
+                    try:
+                        import requests as _req
+                        r = _req.get("https://api.ipify.org?format=json", timeout=5)
+                        return r.json().get("ip", "확인 불가")
+                    except Exception:
+                        return "확인 불가"
+
+                server_ip = _get_server_ip()
+                st.code(f"이 서버의 IP 주소: {server_ip}", language=None)
+                st.caption("⬆️ 이 IP를 업비트/빗썸 API 키의 허용 IP에 등록하세요")
+
+                st.markdown(
+                    "**Secrets 입력 형식:**\n"
+                    "```toml\n"
+                    "[upbit]\n"
+                    'access_key = "발급받은_access_key"\n'
+                    'secret_key = "발급받은_secret_key"\n\n'
+                    "[bithumb]\n"
+                    'api_key = "발급받은_api_key"\n'
+                    'secret_key = "발급받은_secret_key"\n'
+                    "```"
+                )
+            st.markdown("---")
+
+    if _is_logged_in and _has_portfolio:
         from src.scrapers.portfolio import PortfolioManager
 
         @st.cache_data(ttl=300, show_spinner=False)
