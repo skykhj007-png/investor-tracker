@@ -4093,13 +4093,9 @@ elif page == "📡 실시간 모니터링":
         if not portfolio_df.empty:
             st.subheader("💰 내 보유자산")
 
-            # KRW 제외한 코인만 + 먼지(dust) 필터링 (평가금액 ₩100 미만 제외)
+            # KRW 제외한 코인만
             coin_df = portfolio_df[portfolio_df['currency'] != 'KRW'].copy()
             krw_df = portfolio_df[portfolio_df['currency'] == 'KRW']
-            dust_count = 0
-            if not coin_df.empty:
-                dust_count = len(coin_df[coin_df['eval_amount'] < 100])
-                coin_df = coin_df[coin_df['eval_amount'] >= 100].copy()
 
             # 거래소별 총 평가금액
             p1, p2, p3 = st.columns(3)
@@ -4121,13 +4117,13 @@ elif page == "📡 실시간 모니터링":
                     # 가격 포맷: 1원 미만이면 소수점 표시
                     cp = row['current_price']
                     if cp > 0 and cp < 1:
-                        cp_str = f"{cp:.4f}"
+                        cp_str = f"{cp:.6f}"
                     elif cp > 0:
                         cp_str = f"{cp:,.0f}"
                     else:
                         cp_str = "-"
                     ap = row['avg_buy_price']
-                    ap_str = f"{ap:,.0f}" if ap >= 1 else (f"{ap:.4f}" if ap > 0 else "-")
+                    ap_str = f"{ap:,.0f}" if ap >= 1 else (f"{ap:.6f}" if ap > 0 else "-")
                     display_cols.append({
                         '거래소': row['exchange'],
                         '코인': row['currency'],
@@ -4138,10 +4134,6 @@ elif page == "📡 실시간 모니터링":
                         '수익률': f"{pct_icon} {pct:+.1f}%" if row['avg_buy_price'] > 0 else '-',
                     })
                 st.dataframe(pd.DataFrame(display_cols), use_container_width=True, hide_index=True)
-            elif dust_count > 0:
-                st.caption(f"보유 코인이 모두 소액(₩100 미만)입니다. (먼지 {dust_count}개)")
-            if dust_count > 0 and not coin_df.empty:
-                st.caption(f"※ 평가금액 ₩100 미만 소액 코인 {dust_count}개 숨김")
 
             st.markdown("---")
 
