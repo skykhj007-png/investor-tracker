@@ -1,4 +1,4 @@
-"""암호화폐 데이터 스크래퍼 (업비트 + 바이낸스)."""
+"""암호화폐 데이터 스크래퍼 (업비트 + 바이낸스 + 빗썸)."""
 
 import pandas as pd
 import requests
@@ -169,6 +169,43 @@ class UpbitScraper:
             print(f"업비트 캔들 조회 오류: {e}")
             return pd.DataFrame()
 
+    def get_4h_candles(self, market: str, count: int = 42) -> pd.DataFrame:
+        """4시간봉 캔들 조회 (기본 42개 = 7일)."""
+        cache_key = f"candle_4h_{market}_{count}"
+        cached = self._candle_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        try:
+            resp = self.session.get(
+                f"{self.BASE_URL}/candles/minutes/240",
+                params={"market": market, "count": min(count, 200)},
+                timeout=10
+            )
+            data = resp.json()
+
+            records = []
+            for item in data:
+                records.append({
+                    'date': item['candle_date_time_kst'][:16].replace('T', ' '),
+                    'open': item['opening_price'],
+                    'high': item['high_price'],
+                    'low': item['low_price'],
+                    'close': item['trade_price'],
+                    'volume': item['candle_acc_trade_volume'],
+                })
+
+            df = pd.DataFrame(records)
+            if not df.empty:
+                df = df.sort_values('date').reset_index(drop=True)
+
+            self._candle_cache.set(cache_key, df)
+            return df
+
+        except Exception as e:
+            print(f"업비트 4h 캔들 조회 오류: {e}")
+            return pd.DataFrame()
+
     def get_top_coins_by_volume(self, top_n: int = 30) -> pd.DataFrame:
         """거래대금 기준 상위 코인."""
         tickers = self.get_tickers()
@@ -297,6 +334,41 @@ class BinanceScraper:
             print(f"바이낸스 캔들 조회 오류: {e}")
             return pd.DataFrame()
 
+    def get_4h_candles(self, symbol: str, limit: int = 42) -> pd.DataFrame:
+        """4시간봉 캔들 조회 (기본 42개 = 7일)."""
+        cache_key = f"candle_4h_{symbol}_{limit}"
+        cached = self._candle_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        base_url = self._get_base_url()
+        try:
+            resp = self.session.get(
+                f"{base_url}/klines",
+                params={"symbol": symbol, "interval": "4h", "limit": min(limit, 500)},
+                timeout=15
+            )
+            data = resp.json()
+
+            records = []
+            for item in data:
+                records.append({
+                    'date': datetime.fromtimestamp(item[0] / 1000).strftime('%Y-%m-%d %H:%M'),
+                    'open': float(item[1]),
+                    'high': float(item[2]),
+                    'low': float(item[3]),
+                    'close': float(item[4]),
+                    'volume': float(item[5]),
+                })
+
+            df = pd.DataFrame(records)
+            self._candle_cache.set(cache_key, df)
+            return df
+
+        except Exception as e:
+            print(f"바이낸스 4h 캔들 조회 오류: {e}")
+            return pd.DataFrame()
+
     def get_top_coins_by_volume(self, top_n: int = 30) -> pd.DataFrame:
         """거래대금 상위 코인 (USDT 기준)."""
         stats = self.get_24hr_stats()
@@ -311,17 +383,187 @@ class BinanceScraper:
                       'volume_24h', 'quote_volume_만달러', 'high_price', 'low_price']].copy()
 
 
+class BithumbScraper:
+    """빗썸 공개 API 스크래퍼."""
+
+    BASE_URL = "https://api.bithumb.com/public"
+
+    def __init__(self):
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json",
+        })
+        self._cache = _SimpleCache(ttl_seconds=60)
+        self._candle_cache = _SimpleCache(ttl_seconds=300)
+
+    def get_krw_tickers(self) -> pd.DataFrame:
+        """전체 KRW 코인 시세 일괄 조회."""
+        cached = self._cache.get("krw_tickers")
+        if cached is not None:
+            return cached
+
+        try:
+            resp = self.session.get(f"{self.BASE_URL}/ticker/ALL_KRW", timeout=10)
+            data = resp.json()
+
+            if data.get('status') != '0000':
+                print(f"빗썸 API 오류: {data.get('message', 'unknown')}")
+                return pd.DataFrame()
+
+            ticker_data = data.get('data', {})
+            date_str = ticker_data.pop('date', None)
+
+            records = []
+            for symbol, info in ticker_data.items():
+                if not isinstance(info, dict):
+                    continue
+                try:
+                    closing = float(info.get('closing_price', 0))
+                    prev = float(info.get('prev_closing_price', 0))
+                    change_rate = ((closing - prev) / prev * 100) if prev > 0 else 0
+
+                    records.append({
+                        'market': f'KRW-{symbol}',
+                        'symbol': symbol,
+                        'name': COIN_NAMES_KR.get(symbol, symbol),
+                        'price': closing,
+                        'change_rate': round(change_rate, 2),
+                        'change_price': closing - prev,
+                        'volume_24h': float(info.get('units_traded_24H', 0)),
+                        'trade_value_24h': float(info.get('acc_trade_value_24H', 0)),
+                        'high_price': float(info.get('max_price', 0)),
+                        'low_price': float(info.get('min_price', 0)),
+                        'prev_closing_price': prev,
+                    })
+                except (ValueError, TypeError):
+                    continue
+
+            df = pd.DataFrame(records)
+            self._cache.set("krw_tickers", df)
+            return df
+
+        except Exception as e:
+            print(f"빗썸 시세 조회 오류: {e}")
+            return pd.DataFrame()
+
+    def get_daily_candles(self, symbol: str, count: int = 30) -> pd.DataFrame:
+        """일봉 캔들 조회. symbol은 'BTC' 형태 (KRW- 접두사 제거)."""
+        clean_symbol = symbol.replace('KRW-', '')
+        cache_key = f"candle_{clean_symbol}_{count}"
+        cached = self._candle_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        try:
+            resp = self.session.get(
+                f"{self.BASE_URL}/candlestick/{clean_symbol}_KRW/24h",
+                timeout=10
+            )
+            data = resp.json()
+
+            if data.get('status') != '0000':
+                return pd.DataFrame()
+
+            candles = data.get('data', [])
+
+            records = []
+            for item in candles:
+                if not isinstance(item, list) or len(item) < 6:
+                    continue
+                records.append({
+                    'date': datetime.fromtimestamp(item[0] / 1000).strftime('%Y-%m-%d'),
+                    'open': float(item[1]),
+                    'close': float(item[2]),
+                    'high': float(item[3]),
+                    'low': float(item[4]),
+                    'volume': float(item[5]),
+                })
+
+            df = pd.DataFrame(records)
+            if not df.empty:
+                df = df.drop_duplicates(subset='date').sort_values('date').tail(count).reset_index(drop=True)
+
+            self._candle_cache.set(cache_key, df)
+            return df
+
+        except Exception as e:
+            print(f"빗썸 캔들 조회 오류 ({clean_symbol}): {e}")
+            return pd.DataFrame()
+
+    def get_4h_candles(self, symbol: str, count: int = 42) -> pd.DataFrame:
+        """4시간봉 캔들 조회 (기본 42개 = 7일)."""
+        clean_symbol = symbol.replace('KRW-', '')
+        cache_key = f"candle_4h_{clean_symbol}_{count}"
+        cached = self._candle_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        try:
+            resp = self.session.get(
+                f"{self.BASE_URL}/candlestick/{clean_symbol}_KRW/4h",
+                timeout=10
+            )
+            data = resp.json()
+
+            if data.get('status') != '0000':
+                return pd.DataFrame()
+
+            candles = data.get('data', [])
+
+            records = []
+            for item in candles:
+                if not isinstance(item, list) or len(item) < 6:
+                    continue
+                records.append({
+                    'date': datetime.fromtimestamp(item[0] / 1000).strftime('%Y-%m-%d %H:%M'),
+                    'open': float(item[1]),
+                    'close': float(item[2]),
+                    'high': float(item[3]),
+                    'low': float(item[4]),
+                    'volume': float(item[5]),
+                })
+
+            df = pd.DataFrame(records)
+            if not df.empty:
+                df = df.drop_duplicates(subset='date').sort_values('date').tail(count).reset_index(drop=True)
+
+            self._candle_cache.set(cache_key, df)
+            return df
+
+        except Exception as e:
+            print(f"빗썸 4h 캔들 조회 오류 ({clean_symbol}): {e}")
+            return pd.DataFrame()
+
+    def get_top_coins_by_volume(self, top_n: int = 30) -> pd.DataFrame:
+        """거래대금 기준 상위 코인."""
+        tickers = self.get_krw_tickers()
+        if tickers.empty:
+            return pd.DataFrame()
+
+        tickers = tickers.sort_values('trade_value_24h', ascending=False).head(top_n)
+        tickers = tickers.copy()
+        tickers['rank'] = range(1, len(tickers) + 1)
+        tickers['trade_value_억'] = (tickers['trade_value_24h'] / 1e8).round(0).astype(int)
+
+        return tickers[['rank', 'market', 'symbol', 'name', 'price', 'change_rate',
+                        'volume_24h', 'trade_value_억', 'high_price', 'low_price']].copy()
+
+
 class CryptoScraper:
     """통합 암호화폐 스크래퍼."""
 
     def __init__(self):
         self.upbit = UpbitScraper()
         self.binance = BinanceScraper()
+        self.bithumb = BithumbScraper()
 
     def get_top_coins(self, exchange: str = "upbit", top_n: int = 30) -> pd.DataFrame:
         """거래대금 상위 코인."""
         if exchange == "upbit":
             return self.upbit.get_top_coins_by_volume(top_n)
+        elif exchange == "bithumb":
+            return self.bithumb.get_top_coins_by_volume(top_n)
         else:
             return self.binance.get_top_coins_by_volume(top_n)
 
@@ -329,6 +571,8 @@ class CryptoScraper:
         """급등/급락 코인."""
         if exchange == "upbit":
             tickers = self.upbit.get_tickers()
+        elif exchange == "bithumb":
+            tickers = self.bithumb.get_krw_tickers()
         else:
             tickers = self.binance.get_24hr_stats()
 
@@ -349,8 +593,19 @@ class CryptoScraper:
         """일봉 캔들 조회."""
         if exchange == "upbit":
             return self.upbit.get_daily_candles(market, count)
+        elif exchange == "bithumb":
+            return self.bithumb.get_daily_candles(market, count)
         else:
             return self.binance.get_daily_candles(market, count)
+
+    def get_4h_candles(self, market: str, exchange: str = "upbit", count: int = 42) -> pd.DataFrame:
+        """4시간봉 캔들 조회."""
+        if exchange == "upbit":
+            return self.upbit.get_4h_candles(market, count)
+        elif exchange == "bithumb":
+            return self.bithumb.get_4h_candles(market, count)
+        else:
+            return self.binance.get_4h_candles(market, count)
 
     def get_fear_greed_index(self) -> dict:
         """암호화폐 공포/탐욕 지수 (alternative.me API)."""

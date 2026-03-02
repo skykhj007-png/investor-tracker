@@ -548,18 +548,19 @@ class CryptoRecommender:
         }
 
     def get_recommendations(self, exchange: str = "upbit", top_n: int = 20) -> pd.DataFrame:
-        """종합 추천 코인 (검증된 금융 지표 기반).
+        """종합 추천 코인 (일봉 + 4시간봉 복합 분석).
 
-        점수 산정 (최대 ~130점):
+        점수 산정 (최대 ~143점):
         - 모멘텀 (24h+5d): 최대 20점
         - 거래량 급증: 최대 15점
         - 기술적 (MA+RSI): 최대 20점
         - 거래대금 순위: 최대 10점
         - 추세 지속성: 최대 10점
-        - MACD (신규): 최대 15점
-        - 볼린저밴드 (신규): 최대 15점
-        - 공포탐욕지수 (신규): 최대 15점
-        - 김치프리미엄 (신규, 업비트만): 최대 10점
+        - MACD: 최대 15점
+        - 볼린저밴드: 최대 15점
+        - 공포탐욕지수: 최대 15점
+        - 김치프리미엄 (업비트만): 최대 10점
+        - 4시간봉 단기 시그널: 최대 13점 (RSI 5 + MACD 5 + 연속양봉 3)
         """
         top_coins = self.scraper.get_top_coins(exchange, 50)
         if top_coins.empty:
@@ -583,18 +584,50 @@ class CryptoRecommender:
                 market_id = row['symbol']
                 symbol = row['base']
 
-            # 캔들 데이터 조회
+            # 캔들 데이터 조회 (일봉 + 4시간봉)
             candles = self.scraper.get_candles(market_id, exchange, 30)
-            time.sleep(0.1)  # rate limit
+            time.sleep(0.05)  # rate limit
+            candles_4h = self.scraper.get_4h_candles(market_id, exchange, 42)
+            time.sleep(0.05)  # rate limit
 
-            # 기존 분석
+            # 일봉 기반 분석 (기존)
             tech = self._analyze_technical(candles)
             momentum = self._analyze_momentum(row['change_rate'], candles)
             volume = self._analyze_volume(candles)
 
-            # 신규 분석
+            # 일봉 MACD/볼린저
             macd_data = self._calculate_macd(candles['close']) if not candles.empty and len(candles) >= 26 else {'macd_score': 0, 'cross': 'none', 'signals': []}
             bb_data = self._analyze_bollinger(candles)
+
+            # 4시간봉 추가 분석 (단기 시그널 보강)
+            _4h_bonus = 0
+            _4h_signals = []
+            if not candles_4h.empty and len(candles_4h) >= 14:
+                _4h_rsi = self._calculate_rsi(candles_4h['close'], 14)
+                _4h_macd = self._calculate_macd(candles_4h['close']) if len(candles_4h) >= 26 else {'macd_score': 0, 'cross': 'none', 'signals': []}
+
+                # 4h RSI 과매도 반등 신호
+                if _4h_rsi < 30:
+                    _4h_bonus += 5
+                    _4h_signals.append(f"⏰4h과매도(RSI:{_4h_rsi:.0f})")
+                elif _4h_rsi > 70:
+                    _4h_bonus -= 3
+                    _4h_signals.append(f"⚠️4h과매수(RSI:{_4h_rsi:.0f})")
+
+                # 4h MACD 골든크로스
+                if _4h_macd.get('cross') == 'golden':
+                    _4h_bonus += 5
+                    _4h_signals.append("⏰4h골든크로스")
+                elif _4h_macd.get('cross') == 'dead':
+                    _4h_bonus -= 3
+                    _4h_signals.append("⚠️4h데드크로스")
+
+                # 4h 최근 3봉 연속 양봉
+                last3_4h = candles_4h.tail(3)
+                green_4h = sum(1 for _, c in last3_4h.iterrows() if c['close'] > c['open'])
+                if green_4h >= 3:
+                    _4h_bonus += 3
+                    _4h_signals.append("⏰4h연속양봉")
 
             # 거래대금 순위 보너스 (최대 10점)
             rank_score = 0
@@ -619,7 +652,7 @@ class CryptoRecommender:
                     trend_score = 5
                     trend_signals.append("📈2연속양봉")
 
-            # 총점
+            # 총점 (일봉 + 4시간봉 보너스)
             total = (
                 min(20, tech['technical_score']) +
                 min(20, momentum['momentum_score']) +
@@ -629,11 +662,13 @@ class CryptoRecommender:
                 macd_data['macd_score'] +
                 bb_data['bb_score'] +
                 fg_data['fg_score'] +
-                kp_data['kp_score']
+                kp_data['kp_score'] +
+                _4h_bonus
             )
 
             all_signals = (tech['signals'] + momentum['signals'] + volume['signals'] +
-                          macd_data['signals'] + bb_data['signals'] + trend_signals)
+                          macd_data['signals'] + bb_data['signals'] + trend_signals +
+                          _4h_signals)
             # 시장 전체 신호는 1위에만 표시
             if i == 0:
                 all_signals.extend(fg_data['signals'])

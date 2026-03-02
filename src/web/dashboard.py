@@ -618,7 +618,7 @@ def translate_activity(activity: str) -> str:
     return activity  # 매칭 안 되면 원문 그대로
 
 # 메뉴 목록
-MENU_ITEMS = ["🏠 홈", "📌 내 관심종목", "💼 포트폴리오", "🔍 공통 종목", "📈 변화 분석", "🌐 Grand Portfolio", "🇰🇷 국내주식", "🎯 종목 추천", "📊 진입/손절 분석", "🌍 해외 종목 추천", "💰 연금저축", "🪙 현물코인"]
+MENU_ITEMS = ["🏠 홈", "📡 실시간 모니터링", "📌 내 관심종목", "💼 포트폴리오", "🔍 공통 종목", "📈 변화 분석", "🌐 Grand Portfolio", "🇰🇷 국내주식", "🎯 종목 추천", "📊 진입/손절 분석", "🌍 해외 종목 추천", "💰 연금저축", "🪙 현물코인"]
 
 # 네비게이션 콜백 함수
 def navigate_to(page_name):
@@ -656,6 +656,7 @@ if page == "🏠 홈":
 
     # 모바일용 메뉴 버튼 (2열 배치)
     menu_buttons = [
+        ("📡", "실시간 모니터링", "주식+코인 매수 시그널 자동감시", "📡 실시간 모니터링"),
         ("📌", "내 관심종목", "보유/관심 종목 실시간 알림", "📌 내 관심종목"),
         ("💼", "포트폴리오", "개별 투자자 보유 종목 조회", "💼 포트폴리오"),
         ("🔍", "공통 종목", "투자자 공통 보유 종목", "🔍 공통 종목"),
@@ -804,12 +805,12 @@ elif page == "📌 내 관심종목":
 
     with col3:
         st.markdown("**🪙 현물 코인**")
-        coin_ex = st.radio("거래소", ["업비트", "바이낸스"], horizontal=True, key="coin_watch_ex")
+        coin_ex = st.radio("거래소", ["업비트", "바이낸스", "빗썸"], horizontal=True, key="coin_watch_ex")
         coin_input = st.text_input("코인 심볼 (예: BTC)", placeholder="BTC", key="coin_add_input")
         if st.button("추가", key="add_coin"):
             if coin_input and coin_input.strip():
                 sym = coin_input.strip().upper()
-                ex_key = "upbit" if coin_ex == "업비트" else "binance"
+                ex_key = "upbit" if coin_ex == "업비트" else "bithumb" if coin_ex == "빗썸" else "binance"
                 entry = {"symbol": sym, "exchange": ex_key}
                 if entry not in st.session_state.watchlist_coin:
                     st.session_state.watchlist_coin.append(entry)
@@ -825,7 +826,7 @@ elif page == "📌 내 관심종목":
     popular_coins = ["BTC", "ETH", "XRP", "SOL", "DOGE", "ADA", "AVAX", "LINK"]
     pcols = st.columns(len(popular_coins))
     for i, pc in enumerate(popular_coins):
-        ex_key = "upbit" if coin_ex == "업비트" else "binance"
+        ex_key = "upbit" if coin_ex == "업비트" else "bithumb" if coin_ex == "빗썸" else "binance"
         if pcols[i].button(pc, key=f"quick_coin_{pc}"):
             entry = {"symbol": pc, "exchange": ex_key}
             if entry not in st.session_state.watchlist_coin:
@@ -866,7 +867,7 @@ elif page == "📌 내 관심종목":
         if st.session_state.watchlist_coin:
             for coin in st.session_state.watchlist_coin:
                 c1, c2 = st.columns([3, 1])
-                ex_label = "업비트" if coin['exchange'] == 'upbit' else "바이낸스"
+                ex_label = "업비트" if coin['exchange'] == 'upbit' else "빗썸" if coin['exchange'] == 'bithumb' else "바이낸스"
                 c1.write(f"• {coin['symbol']} ({ex_label})")
                 if c2.button("❌", key=f"del_coin_{coin['symbol']}_{coin['exchange']}"):
                     st.session_state.watchlist_coin.remove(coin)
@@ -1022,8 +1023,8 @@ elif page == "📌 내 관심종목":
                     try:
                         sym = coin['symbol']
                         ex = coin['exchange']
-                        ex_label = "업비트" if ex == "upbit" else "바이낸스"
-                        market = f"KRW-{sym}" if ex == "upbit" else f"{sym}USDT"
+                        ex_label = "업비트" if ex == "upbit" else "빗썸" if ex == "bithumb" else "바이낸스"
+                        market = f"KRW-{sym}" if ex in ("upbit", "bithumb") else f"{sym}USDT"
 
                         with st.spinner(f"{sym} ({ex_label}) 분석 중..."):
                             crypto_scraper = get_crypto_scraper()
@@ -1044,6 +1045,8 @@ elif page == "📌 내 관심종목":
 
                                 if ex == "upbit":
                                     candles = crypto_scraper.upbit.get_daily_candles(f"KRW-{sym}", 30)
+                                elif ex == "bithumb":
+                                    candles = crypto_scraper.bithumb.get_daily_candles(sym, 30)
                                 else:
                                     candles = crypto_scraper.binance.get_daily_candles(f"{sym}USDT", 30)
 
@@ -1180,6 +1183,8 @@ elif page == "📌 내 관심종목":
                             crypto_scraper = get_crypto_scraper()
                             if ex == "upbit":
                                 candles = crypto_scraper.upbit.get_daily_candles(f"KRW-{sym}", 30)
+                            elif ex == "bithumb":
+                                candles = crypto_scraper.bithumb.get_daily_candles(sym, 30)
                             else:
                                 candles = crypto_scraper.binance.get_daily_candles(f"{sym}USDT", 30)
 
@@ -3433,8 +3438,8 @@ elif page == "🪙 현물코인":
 
         col1, col2 = st.columns([1, 3])
         with col1:
-            exchange = st.radio("거래소", ["업비트 (KRW)", "바이낸스 (USDT)"], key="t1_exchange")
-            ex_key = "upbit" if "업비트" in exchange else "binance"
+            exchange = st.radio("거래소", ["업비트 (KRW)", "바이낸스 (USDT)", "빗썸 (KRW)"], key="t1_exchange")
+            ex_key = "upbit" if "업비트" in exchange else "bithumb" if "빗썸" in exchange else "binance"
         with col2:
             top_n = st.slider("종목 수", 10, 50, 30, key="t1_topn")
 
@@ -3490,8 +3495,8 @@ elif page == "🪙 현물코인":
     with tab2:
         st.subheader("24시간 급등/급락 코인")
 
-        exchange2 = st.radio("거래소", ["업비트 (KRW)", "바이낸스 (USDT)"], key="t2_exchange", horizontal=True)
-        ex_key2 = "upbit" if "업비트" in exchange2 else "binance"
+        exchange2 = st.radio("거래소", ["업비트 (KRW)", "바이낸스 (USDT)", "빗썸 (KRW)"], key="t2_exchange", horizontal=True)
+        ex_key2 = "upbit" if "업비트" in exchange2 else "bithumb" if "빗썸" in exchange2 else "binance"
 
         with st.spinner("데이터 분석 중..."):
             movers = cached_movers(ex_key2, 10)
@@ -3550,8 +3555,8 @@ elif page == "🪙 현물코인":
         st.subheader("거래량 급증 코인")
         st.markdown("*최근 거래량이 7일 평균 대비 급증한 코인*")
 
-        exchange3 = st.radio("거래소", ["업비트 (KRW)", "바이낸스 (USDT)"], key="t3_exchange", horizontal=True)
-        ex_key3 = "upbit" if "업비트" in exchange3 else "binance"
+        exchange3 = st.radio("거래소", ["업비트 (KRW)", "바이낸스 (USDT)", "빗썸 (KRW)"], key="t3_exchange", horizontal=True)
+        ex_key3 = "upbit" if "업비트" in exchange3 else "bithumb" if "빗썸" in exchange3 else "binance"
 
         with st.spinner("거래량 분석 중... (최대 1분 소요)"):
             vol_surge = cached_volume_surge(ex_key3, 15)
@@ -3591,8 +3596,8 @@ elif page == "🪙 현물코인":
     with tab4:
         st.subheader("개별 코인 기술적 분석")
 
-        exchange4 = st.radio("거래소", ["업비트 (KRW)", "바이낸스 (USDT)"], key="t4_exchange", horizontal=True)
-        ex_key4 = "upbit" if "업비트" in exchange4 else "binance"
+        exchange4 = st.radio("거래소", ["업비트 (KRW)", "바이낸스 (USDT)", "빗썸 (KRW)"], key="t4_exchange", horizontal=True)
+        ex_key4 = "upbit" if "업비트" in exchange4 else "bithumb" if "빗썸" in exchange4 else "binance"
 
         # 코인 선택
         with st.spinner("코인 목록 로딩..."):
@@ -3781,8 +3786,8 @@ elif page == "🪙 현물코인":
         st.subheader("종합 추천 코인")
         st.markdown("*모멘텀 + 거래량 + 기술적 분석 종합 점수*")
 
-        exchange5 = st.radio("거래소", ["업비트 (KRW)", "바이낸스 (USDT)"], key="t5_exchange", horizontal=True)
-        ex_key5 = "upbit" if "업비트" in exchange5 else "binance"
+        exchange5 = st.radio("거래소", ["업비트 (KRW)", "바이낸스 (USDT)", "빗썸 (KRW)"], key="t5_exchange", horizontal=True)
+        ex_key5 = "upbit" if "업비트" in exchange5 else "bithumb" if "빗썸" in exchange5 else "binance"
 
         st.info("""
         **점수 산정 기준 (최대 ~130점):**
@@ -3875,7 +3880,7 @@ elif page == "🪙 현물코인":
                 with st.expander(f"{row['rank']}. {row['name']} ({row['symbol']}) - 점수: {row['score']}"):
                     col1, col2, col3, col4, col5 = st.columns(5)
                     try:
-                        price_str = f"{float(row['price']):,.0f}원" if ex_key5 == "upbit" else f"${float(row['price']):,.4f}"
+                        price_str = f"{float(row['price']):,.0f}원" if ex_key5 in ("upbit", "bithumb") else f"${float(row['price']):,.4f}"
                         col1.metric("현재가", price_str)
                     except (ValueError, TypeError):
                         col1.metric("현재가", "-")
@@ -3899,7 +3904,7 @@ elif page == "🪙 현물코인":
                     if row.get('entry_point', 0) > 0:
                         st.markdown("---")
                         e1, e2, e3, e4 = st.columns(4)
-                        if ex_key5 == "upbit":
+                        if ex_key5 in ("upbit", "bithumb"):
                             e1.metric("🎯 진입점", f"{row['entry_point']:,.0f}원")
                             e2.metric("🛑 손절", f"{row['stop_loss']:,.0f}원", f"{row['stop_loss_pct']:+.1f}%")
                             if row.get('target_1', 0) > 0:
@@ -3937,4 +3942,365 @@ elif page == "🪙 현물코인":
     # Disclaimer
     st.markdown("---")
     st.caption("⚠️ **투자 유의사항**: 이 추천은 참고용이며 투자 권유가 아닙니다. 암호화폐는 높은 변동성을 가지므로 투자에 주의하세요.")
+    st.stop()
+
+# ──────────────────────────────────────────────────────────────
+# 📡 실시간 모니터링
+# ──────────────────────────────────────────────────────────────
+elif page == "📡 실시간 모니터링":
+    st.title("📡 실시간 모니터링")
+    st.caption("국내주식 + 암호화폐 매수 시그널 자동 감시 | 5분마다 자동 새로고침")
+
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    st.markdown(f"🕐 **마지막 업데이트**: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+
+    # ── 시장 개요 ──
+    ov1, ov2, ov3 = st.columns(3)
+
+    crypto_scraper = get_crypto_scraper()
+
+    try:
+        fg = crypto_scraper.get_fear_greed_index()
+        fg_val = fg['value']
+        fg_label = fg['classification']
+        fg_color = "🟢" if fg_val < 25 else "🟡" if fg_val < 45 else "🟠" if fg_val < 55 else "🔴"
+        ov1.metric("공포/탐욕 지수", f"{fg_color} {fg_val} ({fg_label})")
+    except Exception:
+        ov1.metric("공포/탐욕 지수", "N/A")
+
+    try:
+        kp = crypto_scraper.get_kimchi_premium()
+        avg_kp = kp.get('avg_premium', 0)
+        kp_color = "🔴" if avg_kp > 5 else "🟡" if avg_kp > 2 else "🟢" if avg_kp > -1 else "🔵"
+        ov2.metric("김치프리미엄", f"{kp_color} {avg_kp:+.2f}%")
+    except Exception:
+        ov2.metric("김치프리미엄", "N/A")
+
+    hour = now.hour
+    if 9 <= hour < 16 and now.weekday() < 5:
+        ov3.metric("주식시장", "🟢 장중")
+    elif (hour < 9 or (hour == 8 and now.minute >= 30)) and now.weekday() < 5:
+        ov3.metric("주식시장", "🟡 장전")
+    else:
+        ov3.metric("주식시장", "🔴 장마감")
+
+    st.markdown("---")
+
+    # ── 보유자산 모니터링 ──
+    _upbit_keys = {}
+    _bithumb_keys = {}
+    try:
+        _upbit_keys = dict(st.secrets.get("upbit", {}))
+    except Exception:
+        pass
+    try:
+        _bithumb_keys = dict(st.secrets.get("bithumb", {}))
+    except Exception:
+        pass
+
+    _has_portfolio = bool((_upbit_keys.get('access_key') and _upbit_keys.get('secret_key'))
+                          or (_bithumb_keys.get('api_key') and _bithumb_keys.get('secret_key')))
+
+    if _has_portfolio:
+        from src.scrapers.portfolio import PortfolioManager
+
+        @st.cache_data(ttl=300, show_spinner=False)
+        def _cached_portfolio(_upbit_tuple, _bithumb_tuple):
+            uk = dict(zip(('access_key', 'secret_key'), _upbit_tuple)) if _upbit_tuple[0] else None
+            bk = dict(zip(('api_key', 'secret_key'), _bithumb_tuple)) if _bithumb_tuple[0] else None
+            pm = PortfolioManager(uk, bk)
+
+            # 현재가 매핑 (업비트 + 빗썸)
+            price_map = {}
+            crypto_sc = get_crypto_scraper()
+            try:
+                upbit_tickers = crypto_sc.upbit.get_tickers()
+                if not upbit_tickers.empty:
+                    for _, r in upbit_tickers.iterrows():
+                        price_map[r['symbol']] = r['price']
+            except Exception:
+                pass
+            try:
+                bithumb_tickers = crypto_sc.bithumb.get_krw_tickers()
+                if not bithumb_tickers.empty:
+                    for _, r in bithumb_tickers.iterrows():
+                        if r['symbol'] not in price_map:
+                            price_map[r['symbol']] = r['price']
+            except Exception:
+                pass
+
+            return pm.get_all_holdings(price_map)
+
+        _ut = (_upbit_keys.get('access_key', ''), _upbit_keys.get('secret_key', ''))
+        _bt = (_bithumb_keys.get('api_key', ''), _bithumb_keys.get('secret_key', ''))
+        portfolio_df = _cached_portfolio(_ut, _bt)
+
+        if not portfolio_df.empty:
+            st.subheader("💰 내 보유자산")
+
+            # KRW 제외한 코인만
+            coin_df = portfolio_df[portfolio_df['currency'] != 'KRW'].copy()
+            krw_df = portfolio_df[portfolio_df['currency'] == 'KRW']
+
+            # 거래소별 총 평가금액
+            p1, p2, p3 = st.columns(3)
+            total_eval = coin_df['eval_amount'].sum() if not coin_df.empty else 0
+            total_profit = coin_df['profit'].sum() if not coin_df.empty else 0
+            total_buy = total_eval - total_profit if total_eval > 0 else 0
+            total_pct = (total_profit / total_buy * 100) if total_buy > 0 else 0
+            krw_balance = krw_df['balance'].sum() if not krw_df.empty else 0
+
+            p1.metric("코인 총 평가", f"₩{total_eval:,.0f}")
+            p2.metric("총 수익", f"₩{total_profit:,.0f}", f"{total_pct:+.1f}%")
+            p3.metric("KRW 잔고", f"₩{krw_balance:,.0f}")
+
+            if not coin_df.empty:
+                display_cols = []
+                for _, row in coin_df.iterrows():
+                    pct = row['profit_pct']
+                    pct_icon = "🟢" if pct > 0 else "🔴" if pct < 0 else "⚪"
+                    display_cols.append({
+                        '거래소': row['exchange'],
+                        '코인': row['currency'],
+                        '수량': f"{row['balance']:.4f}" if row['balance'] < 1 else f"{row['balance']:.2f}",
+                        '평단가': f"{row['avg_buy_price']:,.0f}" if row['avg_buy_price'] > 0 else '-',
+                        '현재가': f"{row['current_price']:,.0f}" if row['current_price'] > 0 else '-',
+                        '평가금액': f"₩{row['eval_amount']:,.0f}",
+                        '수익률': f"{pct_icon} {pct:+.1f}%" if row['avg_buy_price'] > 0 else '-',
+                    })
+                st.dataframe(pd.DataFrame(display_cols), use_container_width=True, hide_index=True)
+
+            st.markdown("---")
+
+    # ── 데이터 로딩 ──
+    with st.spinner("매수 시그널 분석 중..."):
+        kr_recs = cached_recommendations(top_n=15)
+        crypto_recs = cached_crypto_recommendations("upbit", 15)
+
+    # ── 국내주식 진입점 폴백 ──
+    if not kr_recs.empty and 'entry_point' in kr_recs.columns:
+        for idx in kr_recs.index:
+            if kr_recs.at[idx, 'entry_point'] == 0:
+                try:
+                    sym = kr_recs.at[idx, 'symbol']
+                    price_info = get_kr_scraper().get_stock_price(sym)
+                    p = price_info.get('close', 0)
+                    if p > 0:
+                        rsi_v = float(kr_recs.at[idx, 'rsi']) if 'rsi' in kr_recs.columns else 50
+                        kr_recs.at[idx, 'entry_point'] = p if rsi_v < 30 else int(p * 0.98)
+                        kr_recs.at[idx, 'stop_loss'] = int(p * 0.93)
+                        kr_recs.at[idx, 'stop_loss_pct'] = -7.0
+                        kr_recs.at[idx, 'target_1'] = int(p * 1.05)
+                        kr_recs.at[idx, 'target_1_pct'] = 5.0
+                        kr_recs.at[idx, 'risk_reward'] = 1.0
+                except Exception:
+                    pass
+
+    # ── 코인 진입점 폴백 ──
+    if not crypto_recs.empty and 'entry_point' in crypto_recs.columns:
+        for idx in crypto_recs.index:
+            if crypto_recs.at[idx, 'entry_point'] == 0 and crypto_recs.at[idx, 'price'] > 0:
+                p = float(crypto_recs.at[idx, 'price'])
+                rsi = float(crypto_recs.at[idx, 'rsi']) if 'rsi' in crypto_recs.columns else 50
+                ma20 = float(crypto_recs.at[idx, 'ma20']) if 'ma20' in crypto_recs.columns and crypto_recs.at[idx, 'ma20'] > 0 else p
+
+                if rsi < 30:
+                    entry = round(p, 2)
+                elif rsi < 40:
+                    entry = round(p * 0.99, 2)
+                elif ma20 < p:
+                    entry = round(ma20, 2)
+                else:
+                    entry = round(p * 0.97, 2)
+
+                if rsi < 30:
+                    sl_pct = 0.95
+                elif rsi < 50:
+                    sl_pct = 0.93
+                else:
+                    sl_pct = 0.90
+                stop = round(entry * sl_pct, 2)
+                stop_pct = round((stop - entry) / entry * 100, 1) if entry > 0 else -5.0
+
+                if rsi < 30:
+                    tgt_mult = 1.15
+                elif rsi < 50:
+                    tgt_mult = 1.08
+                else:
+                    tgt_mult = 1.05
+                target = round(p * tgt_mult, 2)
+                target_pct = round((target - entry) / entry * 100, 1) if entry > 0 else 5.0
+
+                risk = abs(entry - stop) if entry > 0 else 1
+                reward = abs(target - entry) if entry > 0 else 1
+                rr = round(reward / risk, 1) if risk > 0 else 1.0
+
+                crypto_recs.at[idx, 'entry_point'] = entry
+                crypto_recs.at[idx, 'stop_loss'] = stop
+                crypto_recs.at[idx, 'stop_loss_pct'] = stop_pct
+                crypto_recs.at[idx, 'target_1'] = target
+                crypto_recs.at[idx, 'target_1_pct'] = target_pct
+                crypto_recs.at[idx, 'risk_reward'] = rr
+
+    # ── 긴급 매수 시그널 ──
+    urgent_items = []
+
+    if not kr_recs.empty:
+        for _, row in kr_recs[kr_recs['score'] >= 60].iterrows():
+            urgent_items.append({
+                'type': '🇰🇷', 'name': row['name'], 'symbol': row['symbol'],
+                'score': row['score'], 'signals': str(row.get('signals', ''))
+            })
+
+    if not crypto_recs.empty:
+        for _, row in crypto_recs[crypto_recs['score'] >= 70].iterrows():
+            urgent_items.append({
+                'type': '🪙', 'name': row['name'], 'symbol': row['symbol'],
+                'score': row['score'], 'signals': str(row.get('signals', ''))
+            })
+
+    if urgent_items:
+        urgent_items.sort(key=lambda x: x['score'], reverse=True)
+        st.error(f"🚨 **긴급 매수 시그널 {len(urgent_items)}건**")
+        for item in urgent_items[:5]:
+            st.markdown(f"  {item['type']} **{item['name']}** ({item['symbol']}) — **{item['score']:.0f}점** | {item['signals'][:80]}")
+        st.markdown("---")
+
+    # ── 2열 레이아웃: 주식 | 코인 ──
+    col_kr, col_crypto = st.columns(2)
+
+    # === 국내주식 ===
+    with col_kr:
+        st.subheader("🇰🇷 국내주식 TOP 10")
+
+        if not kr_recs.empty:
+            for _, row in kr_recs.head(10).iterrows():
+                score = row['score']
+                if score >= 70:
+                    badge = "🔴"
+                elif score >= 50:
+                    badge = "🟠"
+                elif score >= 35:
+                    badge = "🟡"
+                else:
+                    badge = "⚪"
+
+                with st.expander(f"{badge} {row['rank']}. {row['name']} ({row['symbol']}) — {score:.0f}점", expanded=(score >= 60)):
+                    m1, m2, m3, m4 = st.columns(4)
+                    m1.metric("외국인", f"{row.get('foreign_억', '-')}억")
+                    m2.metric("기관", f"{row.get('inst_억', '-')}억")
+                    try:
+                        m3.metric("RSI", f"{float(row.get('rsi', 0)):.0f}")
+                    except (ValueError, TypeError):
+                        m3.metric("RSI", "-")
+                    try:
+                        m4.metric("PER", f"{float(row.get('per', 0)):.1f}")
+                    except (ValueError, TypeError):
+                        m4.metric("PER", "-")
+
+                    if row.get('entry_point', 0) > 0:
+                        e1, e2, e3 = st.columns(3)
+                        e1.metric("🎯 진입점", f"{row['entry_point']:,.0f}원")
+                        e2.metric("🛑 손절", f"{row['stop_loss']:,.0f}원", f"{row['stop_loss_pct']:+.1f}%")
+                        if row.get('target_1', 0) > 0:
+                            e3.metric("📈 목표", f"{row['target_1']:,.0f}원", f"+{row['target_1_pct']:.1f}%")
+
+                    st.caption(f"신호: {str(row.get('signals', ''))[:120]}")
+        else:
+            st.warning("국내주식 데이터를 가져올 수 없습니다.")
+
+    # === 암호화폐 ===
+    with col_crypto:
+        st.subheader("🪙 암호화폐 TOP 10 (업비트)")
+
+        if not crypto_recs.empty:
+            for _, row in crypto_recs.head(10).iterrows():
+                score = row['score']
+                if score >= 80:
+                    badge = "🔴"
+                elif score >= 60:
+                    badge = "🟠"
+                elif score >= 40:
+                    badge = "🟡"
+                else:
+                    badge = "⚪"
+
+                with st.expander(f"{badge} {row['rank']}. {row['name']} ({row['symbol']}) — {score:.0f}점", expanded=(score >= 70)):
+                    m1, m2, m3, m4 = st.columns(4)
+                    try:
+                        m1.metric("현재가", f"{float(row['price']):,.0f}원")
+                    except (ValueError, TypeError):
+                        m1.metric("현재가", "-")
+                    try:
+                        m2.metric("24h", f"{float(row.get('change_24h', 0)):+.2f}%")
+                    except (ValueError, TypeError):
+                        m2.metric("24h", "-")
+                    try:
+                        m3.metric("RSI", f"{float(row.get('rsi', 50)):.0f}")
+                    except (ValueError, TypeError):
+                        m3.metric("RSI", "-")
+                    macd_kr = {'golden': '골든크로스', 'dead': '데드크로스', 'bullish': '강세', 'bearish': '약세'}.get(row.get('macd_cross', ''), '-')
+                    m4.metric("MACD", macd_kr)
+
+                    if row.get('entry_point', 0) > 0:
+                        e1, e2, e3 = st.columns(3)
+                        e1.metric("🎯 진입점", f"{row['entry_point']:,.0f}원")
+                        e2.metric("🛑 손절", f"{row['stop_loss']:,.0f}원", f"{row['stop_loss_pct']:+.1f}%")
+                        if row.get('target_1', 0) > 0:
+                            e3.metric("📈 목표", f"{row['target_1']:,.0f}원", f"+{row['target_1_pct']:.1f}%")
+
+                    st.caption(f"신호: {str(row.get('signals', ''))[:120]}")
+        else:
+            st.warning("코인 데이터를 가져올 수 없습니다.")
+
+    # ── 통합 매수 시그널 요약 테이블 ──
+    st.markdown("---")
+    st.subheader("📊 전체 매수 시그널 요약")
+
+    combined_rows = []
+
+    if not kr_recs.empty:
+        for _, row in kr_recs.head(10).iterrows():
+            _rr = 0
+            try:
+                _rr = float(row.get('risk_reward', 0))
+            except (ValueError, TypeError):
+                pass
+            _rr_icon = "🟢" if _rr >= 2 else "🟡" if _rr >= 1 else "🔴"
+            combined_rows.append({
+                '구분': '🇰🇷 주식',
+                '종목': f"{row['name']} ({row['symbol']})",
+                '점수': row['score'],
+                '주요신호': str(row.get('signals', ''))[:60],
+                '진입점': f"{row.get('entry_point', 0):,.0f}원" if row.get('entry_point', 0) > 0 else '-',
+                '목표가': f"{row.get('target_1', 0):,.0f}원" if row.get('target_1', 0) > 0 else '-',
+                '위험/보상': f"{_rr_icon} {_rr:.1f}:1" if _rr > 0 else '-',
+            })
+
+    if not crypto_recs.empty:
+        for _, row in crypto_recs.head(10).iterrows():
+            _rr = 0
+            try:
+                _rr = float(row.get('risk_reward', 0))
+            except (ValueError, TypeError):
+                pass
+            _rr_icon = "🟢" if _rr >= 2 else "🟡" if _rr >= 1 else "🔴"
+            combined_rows.append({
+                '구분': '🪙 코인',
+                '종목': f"{row['name']} ({row['symbol']})",
+                '점수': row['score'],
+                '주요신호': str(row.get('signals', ''))[:60],
+                '진입점': f"{float(row.get('entry_point', 0)):,.0f}원" if row.get('entry_point', 0) > 0 else '-',
+                '목표가': f"{float(row.get('target_1', 0)):,.0f}원" if row.get('target_1', 0) > 0 else '-',
+                '위험/보상': f"{_rr_icon} {_rr:.1f}:1" if _rr > 0 else '-',
+            })
+
+    if combined_rows:
+        combined_df = pd.DataFrame(combined_rows)
+        combined_df = combined_df.sort_values('점수', ascending=False)
+        st.dataframe(combined_df, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+    st.caption("⚠️ **투자 유의사항**: 이 시그널은 참고용이며 투자 권유가 아닙니다. 반드시 본인의 판단하에 투자하세요.")
     st.stop()
