@@ -598,7 +598,7 @@ def translate_activity(activity: str) -> str:
     return activity  # 매칭 안 되면 원문 그대로
 
 # 메뉴 목록
-MENU_ITEMS = ["🏠 홈", "📡 실시간 모니터링", "📌 내 관심종목", "💼 포트폴리오", "🔍 공통 종목", "🌐 Grand Portfolio", "🇰🇷 국내주식", "🌍 해외 종목 추천", "💰 연금저축", "🪙 현물코인"]
+MENU_ITEMS = ["🏠 홈", "📡 실시간 모니터링", "📌 내 관심종목", "💼 포트폴리오", "🔍 공통 종목", "🌐 Grand Portfolio", "🇰🇷 국내주식", "🌍 해외 종목 추천", "💰 연금저축", "🏦 삼성증권 퇴직연금", "🪙 현물코인"]
 
 # 네비게이션 콜백 함수
 def navigate_to(page_name):
@@ -676,6 +676,7 @@ if page == "🏠 홈":
         ("🇰🇷", "국내주식", "투자자 동향/공매도/매집", "🇰🇷 국내주식"),
         ("🌍", "해외 종목 추천", "슈퍼투자자 기반 미국주식", "🌍 해외 종목 추천"),
         ("💰", "연금저축", "ETF 추천/심리분석", "💰 연금저축"),
+        ("🏦", "삼성증권 퇴직연금", "DC/IRP 상품추천", "🏦 삼성증권 퇴직연금"),
         ("🪙", "현물코인", "코인 검색/분석/추천", "🪙 현물코인"),
     ]
 
@@ -729,6 +730,16 @@ if page == "🏠 홈":
   - RSI < 30 : 과매도 구간 = 매수 적기
 - **테마별 추천**: 미국주식, 반도체, 2차전지 등 테마 ETF
 - **시장 심리**: 뉴스 기반 투자 심리 분석 및 자산 배분 제안
+        """)
+
+    with st.expander("삼성증권 퇴직연금 (DC/IRP)", expanded=False):
+        st.markdown("""
+**삼성증권 퇴직연금 전용 ETF 추천 + 포트폴리오 빌더**
+
+- **투자 규칙**: 위험자산 최대 70%, 안전자산 최소 30%
+- **추천 포트폴리오**: 공격/중립/보수 3가지 성향별 모델
+- **상품 수익률**: 퇴직연금 투자가능 ETF 실시간 수익률
+- **수수료**: 다이렉트 IRP 수수료 무료
         """)
 
     with st.expander("현물코인 (암호화폐)", expanded=False):
@@ -2688,6 +2699,466 @@ elif page == "💰 연금저축":
     # Disclaimer
     st.markdown("---")
     st.caption("⚠️ **투자 유의사항**: 이 추천은 참고용이며 투자 권유가 아닙니다. 연금저축 투자는 장기 관점에서 신중하게 결정하세요.")
+    st.stop()
+
+
+# Samsung Securities Retirement Pension page
+elif page == "🏦 삼성증권 퇴직연금":
+    st.title("🏦 삼성증권 퇴직연금")
+    st.markdown("*DC형/IRP 계좌 전용 ETF 추천 + 포트폴리오 빌더*")
+
+    # 삼성증권 퇴직연금 투자가능 ETF (레버리지/인버스 제외)
+    SAMSUNG_PENSION_ETFS = {
+        '미국주식': [
+            ('360750', 'TIGER 미국S&P500', '미국 대형주 500종목 추종, 가장 안정적인 미국 투자'),
+            ('379800', 'KODEX 미국S&P500TR', '배당 재투자(TR), 장기 복리 효과'),
+            ('133690', 'TIGER 미국나스닥100', '나스닥 기술주 100종목, 성장성 높음'),
+            ('379810', 'KODEX 미국나스닥100TR', '배당 재투자(TR), 기술주 장기 투자'),
+            ('381180', 'TIGER 미국테크TOP10 INDXX', '애플/MS/엔비디아 등 빅테크 집중'),
+        ],
+        '국내주식': [
+            ('069500', 'KODEX 200', 'KOSPI 200 추종, 국내 대표 지수 ETF'),
+            ('102110', 'TIGER 200', 'KOSPI 200 추종, KODEX 200과 유사'),
+            ('229200', 'KODEX 코스닥150', '코스닥 성장주 150종목'),
+            ('211560', 'TIGER 배당성장', '배당 성장 기업 투자, 안정적 수익'),
+            ('161510', 'ARIRANG 고배당주', '고배당 우량주, 연금에 적합'),
+            ('104530', 'KODEX 고배당', '고배당 종목 집중 투자'),
+        ],
+        '섹터': [
+            ('091180', 'KODEX 반도체', '삼성전자/SK하이닉스 등 반도체 핵심'),
+            ('091230', 'TIGER 반도체', '반도체 섹터 ETF'),
+            ('305720', 'KODEX 2차전지산업', '배터리/전기차 관련주'),
+            ('364980', 'TIGER 2차전지테마', '2차전지 테마 투자'),
+            ('143860', 'TIGER 헬스케어', '바이오/제약 섹터'),
+            ('266370', 'KODEX AI반도체핵심장비', 'AI 반도체 장비주 집중'),
+        ],
+        '채권': [
+            ('148070', 'KOSEF 국고채10년', '장기 국채, 금리 하락시 수익'),
+            ('114260', 'KODEX 국고채3년', '단기 국채, 안정적'),
+            ('152380', 'KODEX 국고채3년', '국고채 3년물 추종'),
+            ('273130', 'KODEX 종합채권(AA-이상)액티브', '우량 회사채 포함, 수익률 보강'),
+        ],
+        '원자재/금': [
+            ('411060', 'ACE 금현물', '금 현물 추종, 인플레이션 헤지'),
+            ('132030', 'KODEX 골드선물(H)', '금 선물 추종, 환헤지'),
+        ],
+        'TDF': [
+            ('385590', 'KODEX TDF2050액티브', '2050년 은퇴 목표, 자동 자산배분'),
+            ('385600', 'KODEX TDF2040액티브', '2040년 은퇴 목표'),
+        ],
+    }
+
+    # 추천 포트폴리오 모델
+    PORTFOLIO_MODELS = {
+        '공격적 (수익 극대화)': {
+            'description': '미국 기술주 중심, 높은 성장성 추구. 변동성 감수 가능한 투자자용.',
+            'allocation': [
+                ('TIGER 미국나스닥100', '133690', 35, '위험자산'),
+                ('TIGER 미국S&P500', '360750', 25, '위험자산'),
+                ('KODEX 반도체', '091180', 10, '위험자산'),
+                ('KOSEF 국고채10년', '148070', 15, '안전자산'),
+                ('ACE 금현물', '411060', 10, '안전자산'),
+                ('KODEX 국고채3년', '114260', 5, '안전자산'),
+            ],
+        },
+        '중립적 (균형 투자)': {
+            'description': 'S&P500 + 배당 + 채권 균형. 안정과 성장의 조화.',
+            'allocation': [
+                ('KODEX 미국S&P500TR', '379800', 25, '위험자산'),
+                ('TIGER 미국나스닥100', '133690', 20, '위험자산'),
+                ('TIGER 배당성장', '211560', 10, '위험자산'),
+                ('KODEX 200', '069500', 10, '위험자산'),
+                ('KOSEF 국고채10년', '148070', 15, '안전자산'),
+                ('KODEX 종합채권(AA-이상)액티브', '273130', 10, '안전자산'),
+                ('ACE 금현물', '411060', 10, '안전자산'),
+            ],
+        },
+        '보수적 (안정 우선)': {
+            'description': '채권/금 중심, 원금 보전 우선. 은퇴 임박 투자자용.',
+            'allocation': [
+                ('KOSEF 국고채10년', '148070', 25, '안전자산'),
+                ('KODEX 종합채권(AA-이상)액티브', '273130', 20, '안전자산'),
+                ('ACE 금현물', '411060', 10, '안전자산'),
+                ('KODEX 국고채3년', '114260', 10, '안전자산'),
+                ('KODEX 미국S&P500TR', '379800', 20, '위험자산'),
+                ('ARIRANG 고배당주', '161510', 10, '위험자산'),
+                ('TIGER 배당성장', '211560', 5, '위험자산'),
+            ],
+        },
+    }
+
+    tab1, tab2, tab3, tab4 = st.tabs(["📋 투자 규칙", "💼 추천 포트폴리오", "📊 상품 수익률", "🏆 베스트 상품"])
+
+    with tab1:
+        st.subheader("📋 삼성증권 퇴직연금 투자 규칙")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("### 🔴 투자 한도")
+            st.error("""
+**위험자산 최대 70%** / **안전자산 최소 30%**
+
+- 위험자산: 주식형 ETF, 섹터 ETF, 해외주식 ETF
+- 안전자산: 국채 ETF, 종합채권 ETF, 금 ETF, 예금
+            """)
+
+            st.markdown("### 🚫 투자 불가 상품")
+            st.warning("""
+- ❌ 레버리지 ETF (2배/3배)
+- ❌ 인버스 ETF
+- ❌ 파생상품 위험비율 40% 초과 ETF
+- ❌ 개별 국내주식 직접 매수 (DC/IRP)
+            """)
+
+        with col2:
+            st.markdown("### 💰 수수료 안내")
+            st.success("""
+**다이렉트 IRP: 수수료 무료!**
+
+| 구분 | 수수료 |
+|------|--------|
+| 다이렉트 IRP | **무료** |
+| 일반 IRP | 연 0.24~0.30% |
+| 개인 납입분 | 무료 |
+| 퇴직금 보관 (다이렉트) | 무료 |
+
+※ ETF 자체 보수(운용보수)는 별도
+            """)
+
+            st.markdown("### 📱 가입 방법")
+            st.info("""
+- **mPOP 앱** 또는 **모바일 웹**에서 개설
+- 카카오뱅크 연계 IRP 개설 가능
+- 기존 IRP → 다이렉트 전환 가능
+            """)
+
+        st.markdown("---")
+        st.markdown("### 📌 퇴직연금 투자 꿀팁")
+        tips_cols = st.columns(3)
+        with tips_cols[0]:
+            st.markdown("""
+**1. TR(배당재투자) ETF 활용**
+
+연금 계좌는 배당 과세가 이연되므로
+TR ETF로 복리 효과 극대화
+- KODEX 미국S&P500**TR**
+- KODEX 미국나스닥100**TR**
+            """)
+        with tips_cols[1]:
+            st.markdown("""
+**2. ETF 모으기 서비스**
+
+삼성증권 자동매수 기능 활용
+- 매월/매주 자동 적립 가능
+- 시간분산 투자 (DCA) 효과
+- mPOP 앱에서 설정
+            """)
+        with tips_cols[2]:
+            st.markdown("""
+**3. 70:30 비율 준수**
+
+위험자산 70% 한도 관리
+- 수익으로 비율 변동 시 리밸런싱
+- 연 1~2회 비율 점검 권장
+- 은퇴 가까울수록 안전자산↑
+            """)
+
+    with tab2:
+        st.subheader("💼 추천 포트폴리오")
+        st.markdown("*삼성증권 DC/IRP 계좌에 최적화된 포트폴리오 모델*")
+
+        selected_model = st.selectbox(
+            "투자 성향 선택",
+            list(PORTFOLIO_MODELS.keys()),
+            index=1
+        )
+
+        model = PORTFOLIO_MODELS[selected_model]
+        st.info(f"💡 {model['description']}")
+
+        # 비율 체크
+        risk_total = sum(w for _, _, w, t in model['allocation'] if t == '위험자산')
+        safe_total = sum(w for _, _, w, t in model['allocation'] if t == '안전자산')
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("위험자산 비중", f"{risk_total}%", delta=f"한도 70% 이내" if risk_total <= 70 else "한도 초과!", delta_color="normal" if risk_total <= 70 else "inverse")
+        col2.metric("안전자산 비중", f"{safe_total}%", delta=f"최소 30% 충족" if safe_total >= 30 else "미달!", delta_color="normal" if safe_total >= 30 else "inverse")
+        col3.metric("합계", f"{risk_total + safe_total}%")
+
+        # 파이 차트
+        import plotly.express as px
+        names = [name for name, _, _, _ in model['allocation']]
+        values = [w for _, _, w, _ in model['allocation']]
+        colors_map = ['#FF6B6B' if t == '위험자산' else '#4ECDC4' for _, _, _, t in model['allocation']]
+
+        fig = px.pie(
+            names=names,
+            values=values,
+            title=f"포트폴리오 구성 - {selected_model}",
+            color_discrete_sequence=px.colors.qualitative.Set2,
+        )
+        fig.update_traces(textposition='inside', textinfo='label+percent')
+        st.plotly_chart(fig, use_container_width=True)
+
+        # 상세 테이블
+        st.markdown("### 📋 상세 구성")
+        for name, symbol, weight, asset_type in model['allocation']:
+            emoji = "🔴" if asset_type == '위험자산' else "🟢"
+            st.markdown(f"{emoji} **{name}** (`{symbol}`) - **{weight}%** [{asset_type}]")
+
+        # 실시간 수익률 조회
+        st.markdown("---")
+        st.markdown("### 📈 포트폴리오 구성종목 실시간 수익률")
+
+        try:
+            from pykrx import stock as krx
+            from datetime import datetime, timedelta
+            _pykrx_ok = True
+        except ImportError:
+            _pykrx_ok = False
+
+        if _pykrx_ok:
+            with st.spinner("수익률 조회 중..."):
+                from src.scrapers.pension_etf import ETFScraper, get_recent_trading_date
+                etf_scraper = ETFScraper()
+                trd_date = get_recent_trading_date()
+                today_dt = datetime.strptime(trd_date, "%Y%m%d")
+                one_month_start = (today_dt - timedelta(days=35)).strftime("%Y%m%d")
+                one_month_end = (today_dt - timedelta(days=25)).strftime("%Y%m%d")
+
+                portfolio_data = []
+                for name, symbol, weight, asset_type in model['allocation']:
+                    try:
+                        ohlcv = krx.get_etf_ohlcv_by_date(trd_date, trd_date, symbol)
+                        if not ohlcv.empty:
+                            current_price = int(ohlcv.iloc[-1]['종가'])
+                            return_1m = 0
+                            try:
+                                ohlcv_1m = krx.get_etf_ohlcv_by_date(one_month_start, one_month_end, symbol)
+                                if not ohlcv_1m.empty:
+                                    price_1m = ohlcv_1m.iloc[-1]['종가']
+                                    return_1m = round(((current_price - price_1m) / price_1m) * 100, 2)
+                            except:
+                                pass
+                            portfolio_data.append({
+                                '구분': asset_type,
+                                'ETF명': name,
+                                '코드': symbol,
+                                '비중(%)': weight,
+                                '현재가': f"{current_price:,}원",
+                                '1개월수익률(%)': return_1m,
+                            })
+                    except:
+                        portfolio_data.append({
+                            '구분': asset_type,
+                            'ETF명': name,
+                            '코드': symbol,
+                            '비중(%)': weight,
+                            '현재가': '-',
+                            '1개월수익률(%)': 0,
+                        })
+
+                if portfolio_data:
+                    pdf = pd.DataFrame(portfolio_data)
+                    st.dataframe(pdf, use_container_width=True, hide_index=True)
+
+                    # 가중평균 수익률
+                    weighted_return = sum(
+                        row['1개월수익률(%)'] * row['비중(%)'] / 100
+                        for row in portfolio_data if isinstance(row['1개월수익률(%)'], (int, float))
+                    )
+                    st.metric("포트폴리오 가중평균 1개월 수익률", f"{weighted_return:+.2f}%")
+        else:
+            st.warning("pykrx 미설치로 실시간 수익률을 조회할 수 없습니다.")
+
+    with tab3:
+        st.subheader("📊 전체 상품 수익률")
+        st.markdown("*삼성증권 퇴직연금에서 투자 가능한 주요 ETF*")
+
+        # 자산군 필터
+        asset_filter = st.selectbox(
+            "자산군 선택",
+            ["전체"] + list(SAMSUNG_PENSION_ETFS.keys())
+        )
+
+        if _pykrx_ok:
+            with st.spinner("상품 수익률 조회 중..."):
+                from src.scrapers.pension_etf import get_recent_trading_date
+                trd_date = get_recent_trading_date()
+                today_dt = datetime.strptime(trd_date, "%Y%m%d")
+                one_month_start = (today_dt - timedelta(days=35)).strftime("%Y%m%d")
+                one_month_end = (today_dt - timedelta(days=25)).strftime("%Y%m%d")
+                three_month_start = (today_dt - timedelta(days=95)).strftime("%Y%m%d")
+                three_month_end = (today_dt - timedelta(days=85)).strftime("%Y%m%d")
+
+                all_records = []
+                target_categories = [asset_filter] if asset_filter != "전체" else list(SAMSUNG_PENSION_ETFS.keys())
+
+                for category in target_categories:
+                    for symbol, name, desc in SAMSUNG_PENSION_ETFS[category]:
+                        try:
+                            ohlcv = krx.get_etf_ohlcv_by_date(trd_date, trd_date, symbol)
+                            if ohlcv.empty:
+                                continue
+                            current_price = int(ohlcv.iloc[-1]['종가'])
+
+                            return_1m = 0
+                            try:
+                                ohlcv_1m = krx.get_etf_ohlcv_by_date(one_month_start, one_month_end, symbol)
+                                if not ohlcv_1m.empty:
+                                    return_1m = round(((current_price - ohlcv_1m.iloc[-1]['종가']) / ohlcv_1m.iloc[-1]['종가']) * 100, 2)
+                            except:
+                                pass
+
+                            return_3m = 0
+                            try:
+                                ohlcv_3m = krx.get_etf_ohlcv_by_date(three_month_start, three_month_end, symbol)
+                                if not ohlcv_3m.empty:
+                                    return_3m = round(((current_price - ohlcv_3m.iloc[-1]['종가']) / ohlcv_3m.iloc[-1]['종가']) * 100, 2)
+                            except:
+                                pass
+
+                            all_records.append({
+                                '자산군': category,
+                                'ETF명': name,
+                                '코드': symbol,
+                                '설명': desc,
+                                '현재가': current_price,
+                                '1개월(%)': return_1m,
+                                '3개월(%)': return_3m,
+                            })
+                        except:
+                            continue
+
+                if all_records:
+                    adf = pd.DataFrame(all_records)
+                    adf = adf.sort_values('1개월(%)', ascending=False)
+
+                    # 수익률 차트
+                    fig = px.bar(
+                        adf,
+                        x='ETF명',
+                        y='1개월(%)',
+                        title="퇴직연금 ETF 1개월 수익률",
+                        color='자산군',
+                        hover_data=['설명', '3개월(%)'],
+                    )
+                    fig.update_layout(xaxis_tickangle=-45)
+                    st.plotly_chart(fig, use_container_width=True)
+
+                    # 테이블
+                    display_adf = adf.copy()
+                    display_adf['현재가'] = display_adf['현재가'].apply(lambda x: f"{x:,}원")
+                    st.dataframe(display_adf, use_container_width=True, hide_index=True)
+                else:
+                    st.warning("상품 데이터를 가져올 수 없습니다.")
+        else:
+            # 정적 데이터 표시
+            for category, etfs in SAMSUNG_PENSION_ETFS.items():
+                if asset_filter != "전체" and category != asset_filter:
+                    continue
+                st.markdown(f"### {category}")
+                for symbol, name, desc in etfs:
+                    st.markdown(f"- **{name}** (`{symbol}`) - {desc}")
+
+    with tab4:
+        st.subheader("🏆 베스트 상품 추천")
+        st.markdown("*퇴직연금 장기 투자에 적합한 핵심 상품*")
+
+        st.markdown("### 🥇 안전자산 BEST (30% 필수 배분)")
+
+        safe_picks = [
+            {
+                'name': 'KOSEF 국고채10년',
+                'symbol': '148070',
+                'reason': '한국 국채 10년물 추종. 금리 인하기에 자본차익 기대. 퇴직연금 안전자산의 핵심.',
+                'risk': '★☆☆☆☆',
+                'tip': '금리 인하 예상 시 비중 확대',
+            },
+            {
+                'name': 'ACE 금현물',
+                'symbol': '411060',
+                'reason': '금 현물 가격 추종. 인플레이션 헤지 + 달러 약세 시 강세. 포트폴리오 분산 효과 탁월.',
+                'risk': '★★☆☆☆',
+                'tip': '전체의 5~15% 배분 권장',
+            },
+            {
+                'name': 'KODEX 종합채권(AA-이상)액티브',
+                'symbol': '273130',
+                'reason': '우량 회사채 포함 종합채권. 국채보다 약간 높은 수익률. 안정적 이자수익.',
+                'risk': '★☆☆☆☆',
+                'tip': '국채와 함께 분산 보유',
+            },
+        ]
+
+        for i, pick in enumerate(safe_picks, 1):
+            with st.expander(f"🟢 {i}. {pick['name']} (`{pick['symbol']}`) - 위험도: {pick['risk']}", expanded=True):
+                st.markdown(f"**추천 이유**: {pick['reason']}")
+                st.markdown(f"**💡 투자 팁**: {pick['tip']}")
+
+        st.markdown("---")
+        st.markdown("### 🥇 위험자산 BEST (최대 70% 배분)")
+
+        risk_picks = [
+            {
+                'name': 'KODEX 미국S&P500TR',
+                'symbol': '379800',
+                'reason': '미국 대형주 500종목. 배당 재투자(TR)로 장기 복리 극대화. 퇴직연금 핵심 상품.',
+                'risk': '★★★☆☆',
+                'tip': '퇴직연금 위험자산의 40~50% 배분. TR이 일반형보다 장기 수익률 우수.',
+            },
+            {
+                'name': 'KODEX 미국나스닥100TR',
+                'symbol': '379810',
+                'reason': '나스닥100 기술주. AI/빅테크 성장 수혜. TR로 배당 재투자 복리 효과.',
+                'risk': '★★★★☆',
+                'tip': 'S&P500과 함께 미국주식 비중 구성. 변동성 높으나 장기 성장성 우수.',
+            },
+            {
+                'name': 'TIGER 배당성장',
+                'symbol': '211560',
+                'reason': '배당을 꾸준히 늘리는 우량기업 투자. 하락장 방어력 우수. 안정적 현금흐름.',
+                'risk': '★★☆☆☆',
+                'tip': '국내주식 비중의 핵심. 변동성 낮고 장기 성과 안정적.',
+            },
+            {
+                'name': 'KODEX 반도체',
+                'symbol': '091180',
+                'reason': '삼성전자/SK하이닉스 중심 반도체 섹터. AI/HBM 수혜 기대.',
+                'risk': '★★★★☆',
+                'tip': '성장 테마로 10~15% 배분. 변동성 크므로 분할 매수.',
+            },
+            {
+                'name': 'TIGER 미국테크TOP10 INDXX',
+                'symbol': '381180',
+                'reason': '애플/마이크로소프트/엔비디아 등 빅테크 10종목 집중. 최고 성장주 투자.',
+                'risk': '★★★★★',
+                'tip': '집중투자 성격. 전체의 5~10% 소량 배분 권장.',
+            },
+        ]
+
+        for i, pick in enumerate(risk_picks, 1):
+            with st.expander(f"🔴 {i}. {pick['name']} (`{pick['symbol']}`) - 위험도: {pick['risk']}", expanded=i <= 3):
+                st.markdown(f"**추천 이유**: {pick['reason']}")
+                st.markdown(f"**💡 투자 팁**: {pick['tip']}")
+
+        st.markdown("---")
+        st.success("""
+**💡 삼성증권 퇴직연금 핵심 추천 조합 (예시: 1000만원 기준)**
+
+| 구분 | 상품 | 비중 | 금액 |
+|------|------|------|------|
+| 위험자산 | KODEX 미국S&P500TR | 30% | 300만원 |
+| 위험자산 | KODEX 미국나스닥100TR | 25% | 250만원 |
+| 위험자산 | TIGER 배당성장 | 15% | 150만원 |
+| 안전자산 | KOSEF 국고채10년 | 15% | 150만원 |
+| 안전자산 | ACE 금현물 | 10% | 100만원 |
+| 안전자산 | KODEX 종합채권 | 5% | 50만원 |
+| **합계** | | **100%** | **1,000만원** |
+        """)
+
+    st.markdown("---")
+    st.caption("⚠️ **투자 유의사항**: 이 추천은 참고용이며 투자 권유가 아닙니다. 퇴직연금은 장기 투자 관점에서 신중하게 운용하세요. 삼성증권 DC/IRP 계좌의 실제 투자 가능 상품은 계좌 내에서 확인하세요.")
     st.stop()
 
 
