@@ -3189,7 +3189,7 @@ elif page == "🪙 현물코인":
                 key="coin_search_exchange", horizontal=True
             )
 
-        # 코인 목록 로딩
+        # 코인 목록 로딩 (검색 자동완성용)
         @st.cache_data(ttl=600, show_spinner=False)
         def _get_coin_list(exchange_name):
             if "업비트" in exchange_name:
@@ -3209,14 +3209,29 @@ elif page == "🪙 현물코인":
         coin_list = _get_coin_list(search_exchange)
 
         with search_col2:
-            if coin_list:
-                selected_coin = st.selectbox(
-                    "코인 선택", coin_list, key="coin_search_select",
-                    placeholder="코인을 검색하세요..."
-                )
+            search_query = st.text_input(
+                "코인 검색", placeholder="비트코인, BTC, 이더리움 등 입력...",
+                key="coin_search_input"
+            )
+
+        # 검색어로 필터링
+        selected_coin = None
+        if search_query and coin_list:
+            query_upper = search_query.upper().strip()
+            matched = [c for c in coin_list if query_upper in c.upper()]
+            if matched:
+                if len(matched) == 1:
+                    selected_coin = matched[0]
+                    st.caption(f"✅ **{selected_coin}** 선택됨")
+                else:
+                    selected_coin = st.selectbox(
+                        f"검색 결과 ({len(matched)}건)", matched,
+                        key="coin_search_result"
+                    )
             else:
-                selected_coin = None
-                st.warning("코인 목록을 불러올 수 없습니다.")
+                st.warning(f"'{search_query}' 검색 결과가 없습니다.")
+        elif search_query and not coin_list:
+            st.warning("코인 목록을 불러올 수 없습니다.")
 
         if selected_coin and st.button("📊 분석 시작", key="coin_search_btn", type="primary"):
             # 심볼 추출
@@ -3337,14 +3352,102 @@ elif page == "🪙 현물코인":
                     st.markdown("#### 📋 종합 신호")
                     st.markdown(" ".join([f"`{s}`" for s in _signals]))
 
-                # 매수/관망/매도 판정
-                _score = analysis.get('score', 0)
-                if _score >= 70:
-                    st.success(f"✅ **매수 추천** (점수: {_score}점)")
-                elif _score >= 40:
-                    st.info(f"👀 **관망** (점수: {_score}점)")
+                # ── 종합 매수 판단 ──
+                st.markdown("---")
+                st.markdown("#### 🧠 종합 매수 판단")
+
+                _score = analysis.get('technical_score', analysis.get('score', 0))
+                _rsi = analysis.get('rsi', 50)
+                _macd_cross = analysis.get('macd', {}).get('cross', analysis.get('macd_cross', 'none'))
+                _bb_pos = analysis.get('bollinger', {}).get('position', analysis.get('bb_position', 'unknown'))
+                _trend = analysis.get('trend', 'neutral')
+                _rr = analysis.get('risk_reward_ratio', analysis.get('risk_reward', 0))
+
+                # 점수 기반 종합 판단
+                buy_reasons = []
+                sell_reasons = []
+
+                # RSI 분석
+                if _rsi < 30:
+                    buy_reasons.append(f"RSI {_rsi:.0f} → 과매도 구간 (반등 가능성)")
+                elif _rsi < 40:
+                    buy_reasons.append(f"RSI {_rsi:.0f} → 저평가 영역")
+                elif _rsi > 70:
+                    sell_reasons.append(f"RSI {_rsi:.0f} → 과매수 구간 (조정 가능성)")
+                elif _rsi > 60:
+                    sell_reasons.append(f"RSI {_rsi:.0f} → 고평가 영역")
+
+                # MACD 분석
+                if _macd_cross == 'golden':
+                    buy_reasons.append("MACD 골든크로스 발생 (상승 전환)")
+                elif _macd_cross == 'dead':
+                    sell_reasons.append("MACD 데드크로스 발생 (하락 전환)")
+
+                # 볼린저밴드 분석
+                if _bb_pos == 'below_lower':
+                    buy_reasons.append("볼린저 하단 이탈 (과매도, 반등 기대)")
+                elif _bb_pos == 'above_upper':
+                    sell_reasons.append("볼린저 상단 돌파 (과매수, 조정 주의)")
+
+                # 추세 분석
+                if _trend == 'uptrend':
+                    buy_reasons.append("이동평균선 상승 추세 (MA5 > MA20)")
+                elif _trend == 'downtrend':
+                    sell_reasons.append("이동평균선 하락 추세 (MA5 < MA20)")
+
+                # 위험/보상 비율
+                if _rr and _rr >= 2:
+                    buy_reasons.append(f"위험/보상 비율 1:{_rr:.1f} (우수)")
+                elif _rr and _rr < 1:
+                    sell_reasons.append(f"위험/보상 비율 1:{_rr:.1f} (불리)")
+
+                # 최종 판정
+                buy_count = len(buy_reasons)
+                sell_count = len(sell_reasons)
+
+                if buy_count >= 3 or (buy_count >= 2 and sell_count == 0):
+                    verdict = "strong_buy"
+                elif buy_count > sell_count:
+                    verdict = "buy"
+                elif sell_count >= 3 or (sell_count >= 2 and buy_count == 0):
+                    verdict = "strong_sell"
+                elif sell_count > buy_count:
+                    verdict = "sell"
                 else:
-                    st.warning(f"⚠️ **매도/회피** (점수: {_score}점)")
+                    verdict = "hold"
+
+                verdict_map = {
+                    'strong_buy': ("🟢 적극 매수", "st.success", "매수 신호가 강하게 나타나고 있습니다. 분할 매수를 고려하세요."),
+                    'buy': ("🟢 매수 고려", "st.success", "매수 신호가 우세합니다. 진입 타이밍을 잡아보세요."),
+                    'hold': ("🟡 관망", "st.info", "매수/매도 신호가 혼재합니다. 추가 확인 후 판단하세요."),
+                    'sell': ("🔴 매도 고려", "st.warning", "매도 신호가 우세합니다. 보유 중이라면 일부 익절을 고려하세요."),
+                    'strong_sell': ("🔴 매도/회피", "st.error", "매도 신호가 강합니다. 신규 진입은 피하세요."),
+                }
+                v_label, v_func, v_advice = verdict_map[verdict]
+
+                # 판정 표시
+                getattr(st, v_func.split('.')[1])(f"**{v_label}** — {v_advice}")
+
+                # 근거 표시
+                reason_col1, reason_col2 = st.columns(2)
+                with reason_col1:
+                    st.markdown("**✅ 매수 근거**")
+                    if buy_reasons:
+                        for r in buy_reasons:
+                            st.markdown(f"- 🟢 {r}")
+                    else:
+                        st.markdown("- 해당 없음")
+
+                with reason_col2:
+                    st.markdown("**⚠️ 매도/주의 근거**")
+                    if sell_reasons:
+                        for r in sell_reasons:
+                            st.markdown(f"- 🔴 {r}")
+                    else:
+                        st.markdown("- 해당 없음")
+
+                # 점수 요약
+                st.caption(f"기술적 점수: {_score:.0f}점 | 매수근거: {buy_count}개 | 매도근거: {sell_count}개")
 
             else:
                 st.error(f"{_symbol} 분석 데이터를 가져올 수 없습니다. 심볼을 확인해주세요.")
