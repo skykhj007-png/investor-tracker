@@ -2839,12 +2839,12 @@ elif page == "🏦 삼성증권 퇴직연금":
         tips_cols = st.columns(3)
         with tips_cols[0]:
             st.markdown("""
-**1. TR(배당재투자) ETF 활용**
+**1. 연금계좌 세금 이연 효과**
 
-연금 계좌는 배당 과세가 이연되므로
-TR ETF로 복리 효과 극대화
-- KODEX 미국S&P500**TR**
-- KODEX 미국나스닥100**TR**
+연금 계좌는 매매차익/배당 과세 이연
+- 일반 계좌: 배당소득세 15.4% 즉시 과세
+- 연금 계좌: 수령 시까지 과세 이연
+- 복리 효과로 장기 수익률 극대화
             """)
         with tips_cols[1]:
             st.markdown("""
@@ -2932,15 +2932,15 @@ TR ETF로 복리 효과 극대화
                 for name, symbol, weight, asset_type in model['allocation']:
                     try:
                         ohlcv = krx.get_etf_ohlcv_by_date(trd_date, trd_date, symbol)
-                        if not ohlcv.empty:
+                        if ohlcv is not None and len(ohlcv) > 0:
                             current_price = int(ohlcv.iloc[-1]['종가'])
                             return_1m = 0
                             try:
                                 ohlcv_1m = krx.get_etf_ohlcv_by_date(one_month_start, one_month_end, symbol)
-                                if not ohlcv_1m.empty:
+                                if ohlcv_1m is not None and len(ohlcv_1m) > 0:
                                     price_1m = ohlcv_1m.iloc[-1]['종가']
                                     return_1m = round(((current_price - price_1m) / price_1m) * 100, 2)
-                            except:
+                            except Exception:
                                 pass
                             portfolio_data.append({
                                 '구분': asset_type,
@@ -2950,7 +2950,9 @@ TR ETF로 복리 효과 극대화
                                 '현재가': f"{current_price:,}원",
                                 '1개월수익률(%)': return_1m,
                             })
-                    except:
+                        else:
+                            raise ValueError("no data")
+                    except Exception:
                         portfolio_data.append({
                             '구분': asset_type,
                             'ETF명': name,
@@ -3000,24 +3002,24 @@ TR ETF로 복리 효과 극대화
                     for symbol, name, desc in SAMSUNG_PENSION_ETFS[category]:
                         try:
                             ohlcv = krx.get_etf_ohlcv_by_date(trd_date, trd_date, symbol)
-                            if ohlcv.empty:
+                            if ohlcv is None or len(ohlcv) == 0:
                                 continue
                             current_price = int(ohlcv.iloc[-1]['종가'])
 
                             return_1m = 0
                             try:
                                 ohlcv_1m = krx.get_etf_ohlcv_by_date(one_month_start, one_month_end, symbol)
-                                if not ohlcv_1m.empty:
+                                if ohlcv_1m is not None and len(ohlcv_1m) > 0:
                                     return_1m = round(((current_price - ohlcv_1m.iloc[-1]['종가']) / ohlcv_1m.iloc[-1]['종가']) * 100, 2)
-                            except:
+                            except Exception:
                                 pass
 
                             return_3m = 0
                             try:
                                 ohlcv_3m = krx.get_etf_ohlcv_by_date(three_month_start, three_month_end, symbol)
-                                if not ohlcv_3m.empty:
+                                if ohlcv_3m is not None and len(ohlcv_3m) > 0:
                                     return_3m = round(((current_price - ohlcv_3m.iloc[-1]['종가']) / ohlcv_3m.iloc[-1]['종가']) * 100, 2)
-                            except:
+                            except Exception:
                                 pass
 
                             all_records.append({
